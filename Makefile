@@ -16,7 +16,9 @@ CFLAGS     := --target=x86_64-unknown-none \
 LDFLAGS    := -T kernel/linker.ld
 
 KERNEL_SRCS := $(shell find kernel -name '*.c')
-KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD)/obj/%.o,$(KERNEL_SRCS))
+KERNEL_ASMS := $(shell find kernel -name '*.asm')
+KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD)/obj/%.o,$(KERNEL_SRCS)) \
+               $(patsubst kernel/%.asm,$(BUILD)/obj-asm/%.o,$(KERNEL_ASMS))
 
 QEMU       := qemu-system-x86_64
 OVMF_CODE  := /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -27,13 +29,17 @@ QEMU_UEFI  := -machine q35 -cpu qemu64 -m 512M -cdrom $(BUILD)/mirixos.iso \
               -no-reboot
 QEMU_BIOS  := -machine q35 -cpu qemu64 -m 512M -cdrom $(BUILD)/mirixos.iso -no-reboot
 
-.PHONY: all iso run run-bios run-headless debug test-boot clean
+.PHONY: all iso run run-bios run-headless debug test-boot test-crash clean
 
 all: $(KERNEL_ELF)
 
 $(BUILD)/obj/%.o: kernel/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/obj-asm/%.o: kernel/%.asm
+	@mkdir -p $(dir $@)
+	nasm -f elf64 -g -F dwarf $< -o $@
 
 $(KERNEL_ELF): $(KERNEL_OBJS) kernel/linker.ld
 	@mkdir -p $(BUILD)
@@ -59,6 +65,11 @@ run-headless: iso
 # Automated boot test: boots headless, greps serial log for the banner.
 test-boot: iso
 	bash tools/test_boot.sh
+
+# Panic-path test: boots a crash-cmdline ISO, expects a #PF panic screen.
+test-crash:
+	MIRIXOS_CMDLINE=crash MIRIXOS_ISO_NAME=mirixos-crash.iso python3 tools/mkiso.py
+	python3 tools/test_crash.py
 
 # GDB: QEMU waits for a debugger on :1234 (gdb -ex 'target remote :1234').
 debug: iso

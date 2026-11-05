@@ -37,6 +37,19 @@ page across different permissions.
 3. Kernel answers Limine requests, brings up UART console (Phase 0), then
    framebuffer console (Phase 1).
 
+## CPU core (Phase 2a, done)
+
+- GDT: null, kcode `0x08`, kdata `0x10`, ucode `0x18`, udata `0x20`, TSS `0x28`
+  (flat, limit 4 GiB). Loaded via `lgdt` + far return (`gdt.asm`); TSS via `ltr`.
+- TSS: `rsp0` = static 16 KiB kernel stack; IST1 = 4 KiB stack for #DF.
+- IDT: 256 interrupt gates (0x8E), exceptions 0–31 from `isr.asm` stubs
+  (error-code vectors 8,10–14,17,21,29,30 push the real code, others a dummy),
+  IRQs 32–63. `lidt` in `idt_init`.
+- Exception path: `isr_handler` → `panic_dump_regs` → red fb screen + serial
+  dump (vector, error, rip/cs/rflags/rsp/ss, cr2/cr3, all GPRs) → halt.
+  Verified by `make test-crash` (cmdline `crash` → NULL store → #PF).
+- PIC 8259 remapped to 0x20–0x2f, all masked. LAPIC EOI via HHDM+0xFEE000B0.
+
 ## Syscall table
 
 TBD — Phase 3. Interface via `syscall`/`sysret`, number in `rax`, args in

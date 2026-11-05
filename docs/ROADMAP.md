@@ -9,9 +9,13 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
       address), framebuffer console (font8x8, public domain) + serial console,
       "Hello from MirixOS!" banner + color bars on screen. `make test-boot`
       PASS: serial banner + QEMU screendump verified (1280x720, text rendered).
-- [ ] **Phase 2: Kernel core** — GDT/TSS/IDT, exceptions + panic screen with
-      register dump, physical memory manager (bitmap/buddy), paging (VMM),
-      kernel heap (`kmalloc`/`kfree`), APIC/HPET timer.
+- [ ] **Phase 2: Kernel core**
+  - [x] **2a** — GDT/TSS/IDT (256 gates), all 32 exceptions → red panic screen
+        with register dump + CR2 (`make test-crash` PASS: #PF, cr2=0x0,
+        97% red screendump), PIC remapped to 0x20+ and masked.
+  - [ ] **2b** — physical memory manager over the Limine memmap, paging/VMM
+        (map/unmap), kernel heap `kmalloc`/`kfree`.
+  - [ ] **2c** — timer: PIT-calibrated TSC + local APIC timer IRQ, tick counter.
 - [ ] **Phase 3: Processes & syscalls** — threads, context switch (asm),
       round-robin → priority scheduler, `syscall`/`sysret`, ring 3, ELF loader,
       first user program, `fork`/`exec`/`exit`/`wait`.

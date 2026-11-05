@@ -12,6 +12,7 @@ Layout inside the ISO (what Limine expects):
 xorriso writes one ISO that boots both ways: BIOS via El Torito and
 UEFI via the EFI System Partition directory on the ISO9660 volume.
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -20,7 +21,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
 ISO_ROOT = BUILD / "iso_root"
-ISO = BUILD / "mirixos.iso"
+ISO = BUILD / os.environ.get("MIRIXOS_ISO_NAME", "mirixos.iso")
+# Optional kernel cmdline baked into the ISO's limine.conf (for tests).
+CMDLINE = os.environ.get("MIRIXOS_CMDLINE", "")
 
 BOOT_FILES = ["limine.conf", "limine-bios-cd.bin", "limine-uefi-cd.bin"]
 EFI_FILES = ["BOOTX64.EFI", "BOOTIA32.EFI"]
@@ -40,6 +43,10 @@ def main() -> None:
 
     for name in BOOT_FILES:
         shutil.copy2(ROOT / "boot" / name, boot / name)
+    if CMDLINE:
+        conf = (ROOT / "boot" / "limine.conf").read_text().rstrip("\n")
+        conf += f"\ncmdline: {CMDLINE}\n"
+        (boot / "limine.conf").write_text(conf)
     shutil.copy2(kernel, boot / "kernel.elf")
     for name in EFI_FILES:
         shutil.copy2(ROOT / "boot" / name, efi / name)
