@@ -70,6 +70,25 @@ page across different permissions.
   64 pseudo-random blocks, pattern verify, free even-indexed, realloc, verify
   odd blocks untouched → PASS.
 
+## Timer (Phase 2c, done)
+
+- TSC calibration (`drivers/timer.c`): PIT channel 0 one-shot, divisor 65536
+  (~54.9 ms at 1.193182 MHz). Two-phase latch poll — first wait for the count
+  to drop below 0xf000 (stale 0xffff reads after reload would otherwise end
+  the window instantly), then until 0 / wrap. `tsc_hz = dTSC * 1193182 / 65536`.
+  Measured under QEMU TCG: ~2.72 GHz.
+- LAPIC (`drivers/lapic.c`): xAPIC at phys 0xFEE00000 via HHDM, enabled through
+  MSR 0x1B (global enable + xAPIC mode), SVR = 0xff | enable. Registers:
+  EOI 0xB0, SVR 0xF0, timer divide 0x3E0, init count 0x380, LVT 0x320.
+- LAPIC bus calibration: one-shot LVT timer (divide 1) with 50M counts,
+  measured against the calibrated TSC → bus Hz (QEMU TCG assumes ~1 GHz bus,
+  KVM uses the guest TSC — calibrating handles both). Then periodic mode,
+  vector 0x30 (48, above the 16 PIC IRQs), count = bus_hz/100 → 100 Hz.
+- `timer_irq()` (idt.c routes vector 0x30): `ticks++` + LAPIC EOI. Verified:
+  20 ticks in a 200.087 ms TSC-measured window.
+- `msleep()` spins on rdtsc with `pause` (not hlt) so the wait never depends
+  on an IRQ arriving.
+
 ## Syscall table
 
 TBD — Phase 3. Interface via `syscall`/`sysret`, number in `rax`, args in

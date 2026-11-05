@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 2b: kernel entered"
+BANNER = "MirixOS phase 2c: kernel entered"
 
 
 def strip_ansi(data: bytes) -> str:
@@ -102,13 +102,27 @@ def main() -> int:
         # Wait until the kernel banner shows up on serial (max 30s).
         booted = False
         for _ in range(300):
-            if SERIAL.exists() and BANNER in strip_ansi(SERIAL.read_bytes()):
-                booted = True
-                break
+            try:
+                if SERIAL.exists() and BANNER in strip_ansi(SERIAL.read_bytes()):
+                    booted = True
+                    break
+            except OSError:
+                pass  # serial file mid-write on drvfs; retry next poll
             if proc.poll() is not None:
                 break
             time.sleep(0.1)
-        time.sleep(1.0)  # let the kernel finish drawing
+        # Wait until the kernel reaches its final "halting." line (max 30s),
+        # so the timer/tick output is captured before the screendump.
+        for _ in range(300):
+            try:
+                if SERIAL.exists() and "halting." in strip_ansi(SERIAL.read_bytes()):
+                    break
+            except OSError:
+                pass
+            if proc.poll() is not None:
+                break
+            time.sleep(0.1)
+        time.sleep(0.5)  # let the kernel finish drawing
 
         # Screendump via the QEMU monitor (socket in /tmp, image copied back).
         if MON.exists() and booted:
@@ -138,10 +152,19 @@ def main() -> int:
     print("\n".join(serial.splitlines()[-25:]))
     print("-------------------------------------------")
 
+    m = re.search(r"timer: (\d+) ticks in (\d+) us", serial)
+    # 200 ms window at 100 Hz should yield ~20 ticks; allow TCG jitter.
+    ok_timer = m is not None and 5 <= int(m.group(1)) <= 80
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
         and re.search(r"framebuffer: \d+x\d+ bpp=32", serial) is not None
+        and "pmm:" in serial
+        and "heap self-test: PASS" in serial
+        and "vmm: map/unmap roundtrip PASS" in serial
+        and "tsc calibrated" in serial
+        and "lapic: timer started" in serial
+        and ok_timer
     )
 
     ok_screen = False

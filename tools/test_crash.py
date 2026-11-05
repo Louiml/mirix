@@ -53,9 +53,12 @@ def main() -> int:
     try:
         panicked = False
         for _ in range(300):
-            if SERIAL.exists() and "KERNEL PANIC" in strip_ansi(SERIAL.read_bytes()):
-                panicked = True
-                break
+            try:
+                if SERIAL.exists() and "KERNEL PANIC" in strip_ansi(SERIAL.read_bytes()):
+                    panicked = True
+                    break
+            except OSError:
+                pass  # serial file mid-write on drvfs; retry next poll
             if proc.poll() is not None:
                 break
             time.sleep(0.1)

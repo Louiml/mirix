@@ -21,6 +21,7 @@
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/kmalloc.h"
+#include "drivers/timer.h"
 
 #define LIMINE_REQ __attribute__((section(".limine_requests"), used))
 
@@ -68,7 +69,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 2b: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 2c: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -112,7 +113,7 @@ void _start(void)
         fb_init(fb);
         fb_clear(0x0d0d18);
         fb_text(40, 40, 4, 0xffffff, "Hello from MirixOS!");
-        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 2b: PMM + paging + heap");
+        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 2c: PMM + paging + heap + timer");
         static const uint32_t bars[] = {
             0xff0000, 0xff8800, 0xffff00, 0x00ff00,
             0x00ffff, 0x0088ff, 0x8800ff, 0xffffff,
@@ -181,6 +182,21 @@ void _start(void)
             fb_puts("heap: self-test PASS\n");
             fb_puts("vmm: map/unmap roundtrip PASS\n");
         }
+    }
+
+    /* Phase 2c: timer — calibrate TSC via PIT, start LAPIC timer, count ticks */
+    timer_init();
+    sti();   /* let the timer IRQ in */
+    {
+        uint64_t t0 = timer_ticks();
+        uint64_t tsc0 = rdtsc();
+        msleep(200);   /* ~200 ms busy-wait (hlt wakes on each timer IRQ) */
+        uint64_t dt = timer_ticks() - t0;
+        uint64_t elapsed_us = (rdtsc() - tsc0) * 1000000ULL / timer_tsc_hz();
+        uart_printf("timer: %llu ticks in %llu us window (expect ~20 at %d Hz)\n",
+                    (unsigned long long)dt, (unsigned long long)elapsed_us, TIMER_HZ);
+        if (fb_ready())
+            fb_puts("\ntimer: TSC calibrated, LAPIC timer ticking\n");
     }
 
     /* Optional deliberate crash for the automated test: cmdline "crash" */

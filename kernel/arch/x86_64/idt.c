@@ -4,6 +4,8 @@
 #include "lib/uart.h"
 #include "lib/panic.h"
 #include "drivers/pic.h"
+#include "drivers/timer.h"
+#include "drivers/lapic.h"
 
 /* Stub address tables built in isr.asm */
 extern const uint64_t isr_stub_table[32];
@@ -65,18 +67,19 @@ void isr_handler(registers_t *regs)
     kpanic("unexpected isr vector %llu\n", (unsigned long long)regs->vector);
 }
 
-extern uint64_t g_hhdm_offset;   /* from main.c; HHDM base, e.g. 0xffff800000000000 */
-#define LAPIC_EOI_ADDR (g_hhdm_offset + 0xfee000b0ULL)  /* local APIC EOI register */
-
 void irq_handler(registers_t *regs)
 {
     uint64_t v = regs->vector;
+    if (v == TIMER_IRQ_VECTOR) {
+        timer_irq();          /* ticks++ + LAPIC EOI (drivers/timer.c) */
+        return;
+    }
     if (v >= 32 + 16) {
-        /* Local APIC LVT interrupt (e.g. timer): EOI to the LAPIC */
-        *(volatile uint32_t *)LAPIC_EOI_ADDR = 0;
+        /* Other local APIC LVT interrupt: EOI to the LAPIC */
+        lapic_eoi();
     } else {
         pic_eoi((uint8_t)v);
     }
-    /* Phase 2a: no IRQ sources unmasked yet; this only fires on spurious. */
+    /* No other IRQ sources are unmasked yet; this only fires on spurious. */
     uart_printf("irq %llu (spurious?)\n", (unsigned long long)(v - 32));
 }

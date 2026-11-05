@@ -17,7 +17,10 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         VMM map/unmap/get_physical on Limine's PML4 (roundtrip PASS),
         `kmalloc`/`kfree` first-fit heap at `0xffffffffc0000000` (self-test
         PASS: 64 blocks alloc/verify/free/realloc). `make test-boot` PASS.
-  - [ ] **2c** — timer: PIT-calibrated TSC + local APIC timer IRQ, tick counter.
+  - [x] **2c** — timer: TSC calibrated via PIT ch0 one-shot (measured 2.72 GHz),
+        LAPIC bus calibrated via one-shot vs TSC (QEMU TCG ~929 MHz), periodic
+        LVT timer on vector 0x30 at 100 Hz. Boot prints `timer: 20 ticks in
+        200087 us window` (exactly 100 Hz). `make test-boot` PASS.
 - [ ] **Phase 3: Processes & syscalls** — threads, context switch (asm),
       round-robin → priority scheduler, `syscall`/`sysret`, ring 3, ELF loader,
       first user program, `fork`/`exec`/`exit`/`wait`.
