@@ -1,5 +1,8 @@
 #include "uart.h"
 #include "io.h"
+#include "printf.h"
+
+#include <stdarg.h>
 
 #define COM1 0x3F8
 
@@ -37,4 +40,18 @@ void uart_puts(const char *s)
 {
     while (*s)
         uart_putc(*s++);
+}
+
+static void uart_sink(void *ctx, char c)
+{
+    (void)ctx;
+    uart_putc(c);
+}
+
+void uart_printf(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    kvprintf(uart_sink, 0, fmt, ap);
+    va_end(ap);
 }

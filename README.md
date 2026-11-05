@@ -19,12 +19,23 @@ make run-bios      # same via BIOS/SeaBIOS
 make debug         # QEMU paused, waiting for GDB on :1234
 ```
 
-Expected serial output for the current milestone:
+Expected serial output for the current milestone (Phase 1):
 
 ```
-MirixOS phase 0: kernel entered (64-bit, higher half)
+MirixOS phase 1: kernel entered (64-bit, higher half)
 bootloader: Limine 12.9.6
+kernel image: physical_base=0x... virtual_base=0xffffffff80000000
+HHDM offset: 0xffff800000000000 ...
+memmap: 36 entries ...
+usable RAM: 459 MiB
+framebuffer: 1280x720 bpp=32 pitch=5120 addr=0xffff800080000000
+screen: banner + color bars drawn
 ```
+
+`make test-boot` also takes a QEMU screendump and verifies the banner and
+color bars were actually drawn (prints an ASCII-art rendering of the screen).
+`make run` opens the QEMU window via WSLg — you should see "Hello from
+MirixOS!" in big letters on a dark background.
 
 ## Layout
 
@@ -51,5 +62,6 @@ sudo apt install clang lld nasm make python3 xorriso mtools qemu-system-x86 ovmf
 
 ## Status
 
-See [docs/ROADMAP.md](docs/ROADMAP.md). Currently: **Phase 0 done** — repo,
-build system, bootable ISO verified in QEMU.
+See [docs/ROADMAP.md](docs/ROADMAP.md). Currently: **Phase 1 done** — boots via
+Limine (UEFI/OVMF + BIOS), prints the memory map on serial, draws "Hello from
+MirixOS!" on the 1280x720 framebuffer. Verified headless by `make test-boot`.

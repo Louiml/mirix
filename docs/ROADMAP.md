@@ -5,9 +5,10 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
 - [x] **Phase 0: Environment & repo** — WSL toolchain, repo layout, Makefile +
       `tools/mkiso.py`, Limine v12.9.6 pinned, `make test-boot` PASS (headless
       QEMU boots the ISO, kernel prints its banner on serial).
-- [ ] **Phase 1: Boot** — Limine requests (framebuffer, HHDM, memmap, kernel
-      address), framebuffer + serial console, "Hello from MirixOS" on screen,
-      linker script walkthrough.
+- [x] **Phase 1: Boot** — Limine requests (framebuffer, HHDM, memmap, kernel
+      address), framebuffer console (font8x8, public domain) + serial console,
+      "Hello from MirixOS!" banner + color bars on screen. `make test-boot`
+      PASS: serial banner + QEMU screendump verified (1280x720, text rendered).
 - [ ] **Phase 2: Kernel core** — GDT/TSS/IDT, exceptions + panic screen with
       register dump, physical memory manager (bitmap/buddy), paging (VMM),
       kernel heap (`kmalloc`/`kfree`), APIC/HPET timer.

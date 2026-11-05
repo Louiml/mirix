@@ -14,15 +14,20 @@ Living document — updated at every milestone.
   exceptions/RTTI in kernel-adjacent code). Assembly (NASM) only for boot
   stubs, context switch, interrupt/syscall entry.
 
-## Memory map (current, Phase 0/1)
+## Memory map (Phase 1, verified in QEMU)
 
 | Region | Address | Owner |
 |---|---|---|
-| Kernel image (virtual) | `0xffffffff80000000` + | Limine maps ELF here |
-| Higher-half direct map (HHDM) | from Limine HHDM response | all physical RAM, rw |
-| VGA framebuffer | from Limine framebuffer response | linear FB, write-combined |
+| Kernel image (virtual) | `0xffffffff80000000` + (physical_base from Limine, e.g. `0x1dc5c000`) | Limine maps ELF here |
+| Higher-half direct map (HHDM) | `0xffff800000000000` + physical | all physical RAM, rw (observed offset `0xffff800000000000`) |
+| VGA framebuffer | `HHDM + 0x80000000`, 1280x720x32, pitch 5120 | linear FB (observed) |
 | Kernel heap | TBD (Phase 2, inside HHDM-managed region) | `kmalloc`/`kfree` |
 | User space | `0x0000000000400000` … `0x00007fffffffffff` | per-process page tables |
+
+Limine v12 notes (verified against v12.9.6): requests are structs between
+`LIMINE_REQUESTS_START/END_MARKER`s in `.limine_requests` (page-aligned, RW);
+config uses `path: boot():/boot/kernel.elf`; ELF PHDRs must not share a 4K
+page across different permissions.
 
 ## Boot flow
 

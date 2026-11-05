@@ -12,7 +12,7 @@ CFLAGS     := --target=x86_64-unknown-none \
               -fno-pic -fno-pie -mno-red-zone -mcmodel=kernel \
               -mno-mmx -mno-sse -mno-sse2 \
               -O2 -g -Wall -Wextra -std=c17 \
-              -Ikernel
+              -I. -Ikernel
 LDFLAGS    := -T kernel/linker.ld
 
 KERNEL_SRCS := $(shell find kernel -name '*.c')
