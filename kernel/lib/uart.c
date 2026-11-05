@@ -1,0 +1,40 @@
+#include "uart.h"
+#include "io.h"
+
+#define COM1 0x3F8
+
+/* 16550 register offsets */
+#define UART_DATA   0  /* data / divisor latch low  (DLAB=1) */
+#define UART_IER    1  /* interrupt enable / divisor latch high (DLAB=1) */
+#define UART_FCR    2  /* FIFO control (write) */
+#define UART_LCR    3  /* line control */
+#define UART_MCR    4  /* modem control */
+#define UART_LSR    5  /* line status */
+
+#define LSR_THR_EMPTY 0x20
+
+void uart_init(void)
+{
+    outb(COM1 + UART_IER, 0x00);   /* disable interrupts */
+    outb(COM1 + UART_LCR, 0x80);   /* DLAB=1: divisor latch open */
+    outb(COM1 + UART_DATA, 0x01);  /* divisor low  = 1  -> 115200 baud */
+    outb(COM1 + UART_IER, 0x00);   /* divisor high = 0 */
+    outb(COM1 + UART_LCR, 0x03);   /* DLAB=0, 8 data bits, no parity, 1 stop */
+    outb(COM1 + UART_FCR, 0xC7);   /* enable + clear FIFOs, 14-byte trigger */
+    outb(COM1 + UART_MCR, 0x0B);   /* DTR + RTS + OUT2 (IRQs routable) */
+}
+
+void uart_putc(char c)
+{
+    if (c == '\n')          /* CRLF so terminals show lines correctly */
+        uart_putc('\r');
+    while ((inb(COM1 + UART_LSR) & LSR_THR_EMPTY) == 0)
+        ;
+    outb(COM1 + UART_DATA, (uint8_t)c);
+}
+
+void uart_puts(const char *s)
+{
+    while (*s)
+        uart_putc(*s++);
+}

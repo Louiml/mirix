@@ -1,0 +1,11 @@
+# Build output
+build/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor/OS junk
+.DS_Store
+*.swp
+*~

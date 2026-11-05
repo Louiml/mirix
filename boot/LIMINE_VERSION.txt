@@ -1,0 +1,1 @@
+v12.9.6 (github.com/Limine-Bootloader/Limine/releases/tag/v12.9.6, downloaded 2026-11-05)
