@@ -108,6 +108,37 @@ page across different permissions.
 - Quantum: every 4 ticks (40 ms) `sched_tick()` switches. Verified:
   interleaved `[alpha]`/`[beta]`/`[main]` serial output, 15 switches.
 
+## Syscalls & ring 3 (Phase 3b, done)
+
+- GDT order matters for SYSRET: SS = STAR[63:48]+8, CS = STAR[63:48]+16, so
+  user segments are `udata=0x18`, `ucode=0x20` (data before code) and STAR's
+  user base is 0x10. Kernel CS=0x08/SS=0x10 via STAR[47:32].
+- MSRs: EFER.SCE (0xC0000080 bit 0), STAR=0xC0000081, LSTAR=0xC0000082 =
+  `syscall_entry`, SFMASK=0xC0000084 = 0x200 (IF cleared on entry so the
+  stack swap is safe).
+- `syscall.asm`: entry saves user rsp/rip/rflags, switches to a dedicated
+  syscall stack, **saves/restores all argument GPRs around the C call**
+  (SYSCALL only guarantees rcx/r11; the kernel preserves the rest,
+  Linux-style — forgetting this silently corrupts user rdi across calls),
+  shuffles args to SysV order, calls `syscall_dispatch`, then `o64 sysret`.
+- ABI: rax=nr, rdi/rsi/rdx/r10/r8/r9 = args, rax = return.
+- Ring 3 entry: `enter_usermode` pushes ss=0x1B, rsp, rflags=0x202,
+  cs=0x23, rip and `iretq`s. TSS.rsp0 = separate ring-0 IRQ stack.
+- ELF loader (`proc/elf.c`): validates ELF64/ET_EXEC/EM_X86_64, two passes —
+  map all PT_LOAD ranges (+ user stack at 0x800000) once, then memcpy file
+  bytes. Limine identity-maps the low half without USER, so existing
+  identity pages (phys==va) are unmapped and remapped with PTE_USER;
+  walk_alloc ORs USER into pre-existing upper-level entries (user access
+  needs U=1 at EVERY level). User pages are mapped into the kernel's
+  address space for now (per-process PML4 = Phase 3c).
+- Syscalls: 0=write(fd,buf,len) (fd 1/2 = serial, user-pointer validated),
+  1=exit(code), 2=gettid. Scheduler does not preempt while in ring 3
+  (`sched_set_user_mode`) — proper user preemption needs per-process
+  address spaces (3c).
+- User program: `user/hello.c` + `start.asm`, freestanding, linked at
+  0x400000 (`user/hello.ld`), embedded via `tools/elf2h.py` ->
+  `build/hello_elf.h`.
+
 ## Syscall table
 
 TBD — Phase 3. Interface via `syscall`/`sysret`, number in `rax`, args in

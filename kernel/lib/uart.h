@@ -6,6 +6,7 @@
 void uart_init(void);
 void uart_putc(char c);
 void uart_puts(const char *s);
+void uart_write(const char *buf, unsigned long n);   /* raw bytes, no formatting */
 void uart_printf(const char *fmt, ...);   /* printf-format, to serial */
 
 #endif

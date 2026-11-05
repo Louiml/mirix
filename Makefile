@@ -12,13 +12,25 @@ CFLAGS     := --target=x86_64-unknown-none \
               -fno-pic -fno-pie -mno-red-zone -mcmodel=kernel \
               -mno-mmx -mno-sse -mno-sse2 \
               -O2 -g -Wall -Wextra -std=c17 \
-              -I. -Ikernel
+              -I. -Ikernel -I$(BUILD)
 LDFLAGS    := -T kernel/linker.ld
+
+# User program (ring 3): freestanding, linked low at 0x400000, embedded into
+# the kernel as a C array (build/hello_elf.h) and loaded by kernel/proc/elf.c.
+USER_CFLAGS := --target=x86_64-unknown-none \
+              -ffreestanding -fno-stack-protector -fno-stack-check \
+              -fno-pic -fno-pie -mno-red-zone \
+              -mno-mmx -mno-sse -mno-sse2 \
+              -O2 -g -Wall -Wextra -std=c17
+HELLO_ELF   := $(BUILD)/hello.elf
+HELLO_HDR   := $(BUILD)/hello_elf.h
 
 KERNEL_SRCS := $(shell find kernel -name '*.c')
 KERNEL_ASMS := $(shell find kernel -name '*.asm')
 KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD)/obj/%.o,$(KERNEL_SRCS)) \
                $(patsubst kernel/%.asm,$(BUILD)/obj-asm/%.o,$(KERNEL_ASMS))
+# generated header must exist before compiling kernel objects that include it
+$(KERNEL_OBJS): | $(HELLO_HDR)
 
 QEMU       := qemu-system-x86_64
 OVMF_CODE  := /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -41,9 +53,25 @@ $(BUILD)/obj-asm/%.o: kernel/%.asm
 	@mkdir -p $(dir $@)
 	nasm -f elf64 -g -F dwarf $< -o $@
 
-$(KERNEL_ELF): $(KERNEL_OBJS) kernel/linker.ld
+$(KERNEL_ELF): $(KERNEL_OBJS) $(HELLO_HDR) kernel/linker.ld
 	@mkdir -p $(BUILD)
 	ld.lld $(LDFLAGS) -o $@ $(KERNEL_OBJS)
+
+# user/hello.elf + embedded header
+$(BUILD)/obj-user/start.o: user/start.asm
+	@mkdir -p $(dir $@)
+	nasm -f elf64 -g -F dwarf $< -o $@
+
+$(BUILD)/obj-user/hello.o: user/hello.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(HELLO_ELF): $(BUILD)/obj-user/start.o $(BUILD)/obj-user/hello.o user/hello.ld
+	@mkdir -p $(BUILD)
+	ld.lld -T user/hello.ld -nostdlib -static -o $@ $(BUILD)/obj-user/start.o $(BUILD)/obj-user/hello.o
+
+$(HELLO_HDR): $(HELLO_ELF)
+	python3 tools/elf2h.py $< hello_elf > $@
 
 iso: $(KERNEL_ELF)
 	python3 tools/mkiso.py

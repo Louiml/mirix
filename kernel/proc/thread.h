@@ -21,5 +21,7 @@ void sched_tick(registers_t *frame);         /* called from the timer IRQ */
 void sched_switch_from_irq(registers_t *frame);
 uint64_t sched_switches(void);
 const char *current_thread_name(void);
+int current_thread_id(void);
+void sched_set_user_mode(int on);   /* while in ring 3: no preemption */
 
 #endif

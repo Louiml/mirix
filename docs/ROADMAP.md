@@ -26,8 +26,11 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         100 Hz timer IRQ (frame-rewrite switch in the IRQ handler).
         `make test-boot` PASS: interleaved `[alpha]`/`[beta]`/`[main]`
         output, `sched: 15 switches, 81 ticks`.
-  - [ ] **3b** — `syscall`/`sysret` (STAR/LSTAR MSRs), ring 3 via TSS rsp0,
-        ELF loader for a user program, syscall test (write/exit).
+  - [x] **3b** — `syscall`/`sysret` (EFER.SCE, STAR/LSTAR/SFMASK), ring 3 via
+        TSS rsp0 + iretq to cs=0x23/ss=0x1B, ELF64 loader mapping PT_LOAD at
+        0x400000 with PTE_USER (embedded hello.elf), syscalls write/exit/
+        gettid. `make test-boot` PASS: `hello from ring 3!`, `ret=00000024`,
+        `tid=0`, `[user] exit(42)`.
   - [ ] **3c** — process struct (address space per process), `fork`/`exec`/`exit`/`wait`.
 - [ ] **Phase 4: Devices & storage** — PCI, PS/2 + USB-HID keyboard/mouse,
       virtio-blk/AHCI, VFS, ramdisk, FAT32 rw, custom MirixFS.

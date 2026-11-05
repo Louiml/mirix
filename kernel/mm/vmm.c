@@ -32,6 +32,10 @@ static uint64_t *walk_alloc(uint64_t *slot, uint64_t flags)
             f |= PTE_USER;
         *slot = np | f;
         entry = *slot;
+    } else if ((flags & PTE_USER) && !(entry & PTE_USER)) {
+        /* Existing table (e.g. Limine's low-half mapping) without USER:
+         * user access is denied unless EVERY level has U=1. */
+        *slot = entry | PTE_USER;
     }
     return (uint64_t *)phys_to_virt(entry & PTE_ADDR_MASK);
 }

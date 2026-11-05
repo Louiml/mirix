@@ -42,6 +42,12 @@ void uart_puts(const char *s)
         uart_putc(*s++);
 }
 
+void uart_write(const char *buf, unsigned long n)
+{
+    for (unsigned long i = 0; i < n; i++)
+        uart_putc(buf[i]);
+}
+
 static void uart_sink(void *ctx, char c)
 {
     (void)ctx;

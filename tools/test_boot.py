@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 3a: kernel entered"
+BANNER = "MirixOS phase 3b: kernel entered"
 
 
 def strip_ansi(data: bytes) -> str:
@@ -165,6 +165,14 @@ def main() -> int:
         and "[beta]" in serial
         and "[main]" in serial
     )
+    ok_user = (
+        "syscall: STAR=" in serial
+        and "elf: loaded" in serial
+        and "entering ring 3" in serial
+        and "hello from ring 3!" in serial
+        and "tid=" in serial
+        and "[user] exit(42)" in serial
+    )
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -176,6 +184,7 @@ def main() -> int:
         and "lapic: timer started" in serial
         and ok_timer
         and ok_sched
+        and ok_user
     )
 
     ok_screen = False

@@ -52,8 +52,8 @@ void gdt_init(void)
     gdt_set_entry(&g_gdt.null, 0, 0, 0, 0);
     gdt_set_entry(&g_gdt.kcode, 0, 0xfffff, 0x9a, 0xa);  /* exec/read, L=1 (64-bit) */
     gdt_set_entry(&g_gdt.kdata, 0, 0xfffff, 0x92, 0xc);  /* read/write, B=1 */
-    gdt_set_entry(&g_gdt.ucode, 0, 0xfffff, 0xfa, 0xa);  /* ring 3 exec/read */
     gdt_set_entry(&g_gdt.udata, 0, 0xfffff, 0xf2, 0xc);  /* ring 3 read/write */
+    gdt_set_entry(&g_gdt.ucode, 0, 0xfffff, 0xfa, 0xa);  /* ring 3 exec/read */
     gdt_set_tss(&g_gdt.tss, (uint64_t)&g_tss, sizeof(g_tss) - 1);
 
     /* TSS fields */

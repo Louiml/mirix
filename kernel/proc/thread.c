@@ -26,11 +26,19 @@ static thread_t g_threads[MAX_THREADS];
 static int g_nthreads;
 static thread_t *g_current;
 static volatile uint64_t g_switches;
+static int g_user_mode;   /* when set, sched_tick does not preempt */
 
 const char *current_thread_name(void)
 {
     return g_current ? g_current->name : "?";
 }
+
+int current_thread_id(void)
+{
+    return g_current ? g_current->id : -1;
+}
+
+void sched_set_user_mode(int on) { g_user_mode = on; }
 
 uint64_t sched_switches(void) { return g_switches; }
 
@@ -130,6 +138,11 @@ void sched_switch_from_irq(registers_t *frame)
 
 void sched_tick(registers_t *frame)
 {
+    /* Do not preempt while a thread is executing in ring 3: the saved frame
+     * would be a ring-3 iret frame, and mixing user state into the kernel
+     * scheduler is Phase 3c work (per-process address spaces). */
+    if (g_user_mode)
+        return;
     if (timer_ticks() % SCHED_QUANTUM_TICKS == 0)
         sched_switch_from_irq(frame);
 }
