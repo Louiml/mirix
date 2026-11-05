@@ -50,6 +50,26 @@ page across different permissions.
   Verified by `make test-crash` (cmdline `crash` → NULL store → #PF).
 - PIC 8259 remapped to 0x20–0x2f, all masked. LAPIC EOI via HHDM+0xFEE000B0.
 
+## Memory management (Phase 2b, done)
+
+- HHDM: Limine maps all physical RAM at `g_hhdm_offset` (0xffff800000000000);
+  `phys_to_virt()` in `mm/mm.h` converts any physical address.
+- PMM (`kernel/mm/pmm.c`): bitmap, 1 bit per 4 KiB page, sized to the highest
+  `usable` memmap address. Bitmap itself lives in the first usable region that
+  fits (observed: phys 0x1000). Init: mark all used → free usable regions →
+  re-mark bitmap pages + page 0. Alloc = word-skip scan (skip full 0xff qwords)
+  for first 0 bit; free clears the bit. 117536/130668 pages free on a 512 MiB VM.
+- VMM (`kernel/mm/vmm.c`): walks the current PML4 (read CR3, access via HHDM);
+  `walk_alloc` allocates+zeroes missing PDPT/PD/PT levels from the PMM and
+  links them with PRESENT|RW (+USER if requested). `vmm_map/unmap/get_physical`,
+  `invlpg` after changes, 2 MiB huge-page aware in get_physical.
+- Heap (`kernel/mm/kmalloc.c`): first-fit free-list of `block_t{size,free,next}`
+  headers, address-ordered, over a virtual range at `KHEAP_VIRT=0xffffffffc0000000`
+  (grown on demand by mapping fresh PMM pages, 32 MiB cap). Split on alloc when
+  the remainder fits header+16 B; forward-coalesce on free. Self-test:
+  64 pseudo-random blocks, pattern verify, free even-indexed, realloc, verify
+  odd blocks untouched → PASS.
+
 ## Syscall table
 
 TBD — Phase 3. Interface via `syscall`/`sysret`, number in `rax`, args in

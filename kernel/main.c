@@ -1,8 +1,9 @@
-/* MirixOS kernel entry — Phase 2a: GDT/TSS/IDT/exceptions + panic screen.
+/* MirixOS kernel entry — Phase 2b: + PMM (bitmap), VMM map/unmap, kmalloc heap.
  *
  * Boot order: UART -> Limine requests -> framebuffer console -> GDT/TSS ->
- * IDT (+PIC remap). After that, any CPU exception lands in panic_dump_regs
- * and shows a red screen with a register dump.
+ * IDT (+PIC remap) -> PMM over the memmap -> heap init + self-test ->
+ * VMM map/unmap round-trip test. After that, any CPU exception lands in
+ * panic_dump_regs and shows a red screen with a register dump.
  *
  * Boot with `cmdline: crash` (see tools/test_crash.py) to deliberately
  * dereference NULL and watch the #PF panic.
@@ -16,6 +17,10 @@
 #include "arch/x86_64/gdt.h"
 #include "arch/x86_64/idt.h"
 #include "arch/x86_64/cpu.h"
+#include "mm/mm.h"
+#include "mm/pmm.h"
+#include "mm/vmm.h"
+#include "mm/kmalloc.h"
 
 #define LIMINE_REQ __attribute__((section(".limine_requests"), used))
 
@@ -63,7 +68,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 2a: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 2b: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -107,7 +112,7 @@ void _start(void)
         fb_init(fb);
         fb_clear(0x0d0d18);
         fb_text(40, 40, 4, 0xffffff, "Hello from MirixOS!");
-        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 2a: GDT + IDT + exceptions");
+        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 2b: PMM + paging + heap");
         static const uint32_t bars[] = {
             0xff0000, 0xff8800, 0xffff00, 0x00ff00,
             0x00ffff, 0x0088ff, 0x8800ff, 0xffffff,
@@ -128,6 +133,54 @@ void _start(void)
     if (fb_ready()) {
         fb_puts("\ncpu core: gdt/tss/idt/pic ready\n");
         fb_puts("exceptions -> red panic screen\n");
+    }
+
+    /* Phase 2b: physical memory manager over the Limine memmap */
+    if (memmap_request.response == 0)
+        kpanic("no memmap response from Limine\n");
+    pmm_init(memmap_request.response);
+    uart_printf("pmm: %llu/%llu pages free\n",
+                (unsigned long long)pmm_free_pages(),
+                (unsigned long long)pmm_total_pages());
+
+    /* Kernel heap: init + self-test */
+    heap_init();
+    if (!heap_selftest())
+        kpanic("heap self-test FAILED\n");
+    {
+        uint64_t u, f, n;
+        heap_stats(&u, &f, &n);
+        uart_printf("heap: %llu blocks, %llu B used, %llu B free\n",
+                    (unsigned long long)n, (unsigned long long)u,
+                    (unsigned long long)f);
+    }
+
+    /* VMM round-trip: map a scratch page, write through it, read back,
+     * verify the physical address, then unmap and confirm it faults. */
+    {
+        uint64_t scratch = 0xffffffffd0000000ULL;
+        uint64_t phys = pmm_alloc_page();
+        if (phys == 0)
+            kpanic("vmm test: pmm_alloc_page failed\n");
+        vmm_map(scratch, phys, PTE_PRESENT | PTE_RW);
+        volatile uint64_t *cell = (volatile uint64_t *)scratch;
+        *cell = 0xfeedfacecafeULL;
+        uint64_t got = vmm_get_physical(scratch);
+        if (got != phys || *cell != 0xfeedfacecafeULL) {
+            kpanic("vmm test FAILED: got phys=%p want %p\n", (void *)got, (void *)phys);
+        }
+        uart_printf("vmm: map/unmap roundtrip PASS (virt %p -> phys %p, data ok)\n",
+                    (void *)scratch, (void *)phys);
+        vmm_unmap(scratch);
+        if (vmm_get_physical(scratch) != 0)
+            kpanic("vmm test FAILED: page still mapped after unmap\n");
+        uart_printf("vmm: unmap PASS (get_physical now 0)\n");
+        pmm_free_page(phys);
+        if (fb_ready()) {
+            fb_puts("\npmm: bitmap over memmap OK\n");
+            fb_puts("heap: self-test PASS\n");
+            fb_puts("vmm: map/unmap roundtrip PASS\n");
+        }
     }
 
     /* Optional deliberate crash for the automated test: cmdline "crash" */

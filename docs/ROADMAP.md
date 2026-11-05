@@ -13,8 +13,10 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
   - [x] **2a** — GDT/TSS/IDT (256 gates), all 32 exceptions → red panic screen
         with register dump + CR2 (`make test-crash` PASS: #PF, cr2=0x0,
         97% red screendump), PIC remapped to 0x20+ and masked.
-  - [ ] **2b** — physical memory manager over the Limine memmap, paging/VMM
-        (map/unmap), kernel heap `kmalloc`/`kfree`.
+  - [x] **2b** — PMM (bitmap over Limine memmap, 117536/130668 pages free),
+        VMM map/unmap/get_physical on Limine's PML4 (roundtrip PASS),
+        `kmalloc`/`kfree` first-fit heap at `0xffffffffc0000000` (self-test
+        PASS: 64 blocks alloc/verify/free/realloc). `make test-boot` PASS.
   - [ ] **2c** — timer: PIT-calibrated TSC + local APIC timer IRQ, tick counter.
 - [ ] **Phase 3: Processes & syscalls** — threads, context switch (asm),
       round-robin → priority scheduler, `syscall`/`sysret`, ring 3, ELF loader,
