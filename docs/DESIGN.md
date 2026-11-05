@@ -89,6 +89,25 @@ page across different permissions.
 - `msleep()` spins on rdtsc with `pause` (not hlt) so the wait never depends
   on an IRQ arriving.
 
+## Threads & scheduler (Phase 3a, done)
+
+- `kernel/proc/thread.c`: fixed array of `thread_t` (id, name, state,
+  `registers_t saved`, stack from `kmalloc` 16 KiB, entry fn). `sched_init()`
+  adopts the boot stack as thread 0 "main".
+- **Context switch without asm**: the timer IRQ stub already pushed a full
+  `registers_t` frame. `sched_switch_from_irq(frame)` copies the live frame
+  into `current->saved` (forcing `rflags |= 0x200` — interrupt gates clear IF,
+  so the saved frame would otherwise resume with interrupts off), picks the
+  next READY thread round-robin, and copies its `saved` frame over the live
+  one. The normal `irq_common` epilogue + `iretq` then pops the *next*
+  thread's GPRs and rip/cs/rflags/rsp/ss — the CPU becomes that thread.
+  Atomic because the handler runs with IF=0.
+- New threads get a fabricated frame: rip = `thread_trampoline`,
+  cs=0x08, ss=0x10, rflags=0x202, rsp = top of their stack. The trampoline
+  calls the entry fn; on return the thread marks itself DEAD and halts.
+- Quantum: every 4 ticks (40 ms) `sched_tick()` switches. Verified:
+  interleaved `[alpha]`/`[beta]`/`[main]` serial output, 15 switches.
+
 ## Syscall table
 
 TBD — Phase 3. Interface via `syscall`/`sysret`, number in `rax`, args in

@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 2c: kernel entered"
+BANNER = "MirixOS phase 3a: kernel entered"
 
 
 def strip_ansi(data: bytes) -> str:
@@ -155,6 +155,16 @@ def main() -> int:
     m = re.search(r"timer: (\d+) ticks in (\d+) us", serial)
     # 200 ms window at 100 Hz should yield ~20 ticks; allow TCG jitter.
     ok_timer = m is not None and 5 <= int(m.group(1)) <= 80
+    m2 = re.search(r"sched: (\d+) switches, (\d+) ticks", serial)
+    # both demo threads + main must have run, and the scheduler must have
+    # switched at least twice (timer-driven preemption)
+    ok_sched = (
+        m2 is not None
+        and int(m2.group(1)) >= 2
+        and "[alpha]" in serial
+        and "[beta]" in serial
+        and "[main]" in serial
+    )
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -165,6 +175,7 @@ def main() -> int:
         and "tsc calibrated" in serial
         and "lapic: timer started" in serial
         and ok_timer
+        and ok_sched
     )
 
     ok_screen = False

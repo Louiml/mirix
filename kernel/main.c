@@ -22,6 +22,7 @@
 #include "mm/vmm.h"
 #include "mm/kmalloc.h"
 #include "drivers/timer.h"
+#include "proc/thread.h"
 
 #define LIMINE_REQ __attribute__((section(".limine_requests"), used))
 
@@ -50,6 +51,15 @@ static volatile uint64_t requests_end[4] LIMINE_REQ = LIMINE_REQUESTS_END_MARKER
 
 uint64_t g_hhdm_offset;
 
+/* Phase 3a demo worker thread */
+static void worker(void)
+{
+    for (int i = 0; i < 5; i++) {
+        uart_printf("[%s] iter %d\n", current_thread_name(), i);
+        msleep(30);
+    }
+}
+
 static const char *memmap_type_name(uint64_t t)
 {
     switch (t) {
@@ -69,7 +79,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 2c: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 3a: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -113,7 +123,7 @@ void _start(void)
         fb_init(fb);
         fb_clear(0x0d0d18);
         fb_text(40, 40, 4, 0xffffff, "Hello from MirixOS!");
-        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 2c: PMM + paging + heap + timer");
+        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 3a: threads + scheduler");
         static const uint32_t bars[] = {
             0xff0000, 0xff8800, 0xffff00, 0x00ff00,
             0x00ffff, 0x0088ff, 0x8800ff, 0xffffff,
@@ -197,6 +207,22 @@ void _start(void)
                     (unsigned long long)dt, (unsigned long long)elapsed_us, TIMER_HZ);
         if (fb_ready())
             fb_puts("\ntimer: TSC calibrated, LAPIC timer ticking\n");
+    }
+
+    /* Phase 3a: threads + round-robin scheduler, preempted by the timer IRQ */
+    {
+        sched_init();
+        thread_create("alpha", worker);
+        thread_create("beta", worker);
+        for (int i = 0; i < 5; i++) {
+            uart_printf("[main] iter %d\n", i);
+            msleep(25);
+        }
+        uart_printf("sched: %llu switches, %llu ticks total\n",
+                    (unsigned long long)sched_switches(),
+                    (unsigned long long)timer_ticks());
+        if (fb_ready())
+            fb_puts("\nsched: round-robin, preemptive (timer IRQ)\n");
     }
 
     /* Optional deliberate crash for the automated test: cmdline "crash" */

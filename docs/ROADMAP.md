@@ -21,9 +21,14 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         LAPIC bus calibrated via one-shot vs TSC (QEMU TCG ~929 MHz), periodic
         LVT timer on vector 0x30 at 100 Hz. Boot prints `timer: 20 ticks in
         200087 us window` (exactly 100 Hz). `make test-boot` PASS.
-- [ ] **Phase 3: Processes & syscalls** — threads, context switch (asm),
-      round-robin → priority scheduler, `syscall`/`sysret`, ring 3, ELF loader,
-      first user program, `fork`/`exec`/`exit`/`wait`.
+- [ ] **Phase 3: Processes & syscalls**
+  - [x] **3a** — kernel threads + round-robin scheduler, preempted by the
+        100 Hz timer IRQ (frame-rewrite switch in the IRQ handler).
+        `make test-boot` PASS: interleaved `[alpha]`/`[beta]`/`[main]`
+        output, `sched: 15 switches, 81 ticks`.
+  - [ ] **3b** — `syscall`/`sysret` (STAR/LSTAR MSRs), ring 3 via TSS rsp0,
+        ELF loader for a user program, syscall test (write/exit).
+  - [ ] **3c** — process struct (address space per process), `fork`/`exec`/`exit`/`wait`.
 - [ ] **Phase 4: Devices & storage** — PCI, PS/2 + USB-HID keyboard/mouse,
       virtio-blk/AHCI, VFS, ramdisk, FAT32 rw, custom MirixFS.
 - [ ] **Phase 5: Userland foundation** — minimal libc, `init`, `mirsh`,

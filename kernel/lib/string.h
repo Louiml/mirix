@@ -10,5 +10,7 @@ void *memcpy(void *dst, const void *src, size_t n);
 void *memmove(void *dst, const void *src, size_t n);
 size_t strlen(const char *s);
 int strncmp(const char *a, const char *b, size_t n);
+char *strcpy(char *dst, const char *src);
+char *strncpy(char *dst, const char *src, size_t n);
 
 #endif
