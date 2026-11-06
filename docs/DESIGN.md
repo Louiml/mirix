@@ -322,6 +322,26 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
   injects — so a move that would push the cursor off-screen is silently
   dropped. Tests must use in-bounds relative moves (start at 640,360).
 
+## PTY (Phase 7b, done)
+
+- A pty is a pair of `VN_PTY` vnodes sharing one `pty_t` with two 4 KiB
+  byte rings: `m2s` (written on the master, read on the slave) and `s2m`
+  (written on the slave, read on the master). Both directions are
+  **non-blocking**: `vfs_read` returns 0 when the ring is empty (mirsh
+  already yields on `read()==0`), `vfs_write` drops bytes when full.
+- `vfs_pty_create()` registers the pair as `/ptym0` + `/ptys0` in the flat
+  VFS namespace (so plain `open()` works); `vfs_getdents` still lists only
+  `VN_FILE`, so `ls` output is unchanged. `SYS_read`/`SYS_write` accept
+  `VN_PTY` vnodes in addition to `VN_FILE`.
+- `process_spawn_user_fd(name, elf, len, fd0, fd1)` spawns a ring-3
+  process with fds 0/1/2 bound to arbitrary vnodes. mirsh ("shell") runs
+  on the slave; aurora holds the master fd and is the desktop's keyboard
+  dispatcher (it is the only consumer of the kbd ring — `input_pop_filtered`
+  filter 0 — and forwards each keystroke into the pty master).
+- Test-relevant log lines (`vfs: pty created ...`, `pty: shell on ...`)
+  are printed with IF=0 because the timer IRQ preempts mid-`uart_printf`
+  and splits the line, breaking the serial greps.
+
 ## Driver list
 
 | Device | Driver | Phase |

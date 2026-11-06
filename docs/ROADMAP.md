@@ -153,10 +153,19 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         `aurora: drag win 0 -> (210,186)`, `aurora: closed win 1 (Uptime)`;
         screendump shows menu bar, windows, dock. test-boot + test-crash
         PASS.
-  - [ ] **7b** — Terminal app: mirsh running inside a window (PTY-style
-        bridge between window buffer and shell), plus Files (Navigator)
-        over VFS+AHCI and a launcher.
-  - [ ] **7c** — C++ widget toolkit + Text Editor / System Settings apps.
+  - [x] **7b** — Terminal app: mirsh runs INSIDE a window via a kernel
+        PTY. `vfs_pty_create()` registers `/ptym0` (master) + `/ptys0`
+        (slave) as `VN_PTY` vnodes backed by two 4 KiB non-blocking rings;
+        `process_spawn_user_fd()` binds the shell's fds 0/1/2 to the
+        slave. Aurora opens `/ptym0`, forwards keyboard events into the
+        master, drains shell output, mirrors it to serial AND renders it
+        in a dark Terminal window (55x34, 8x8 font, scroll, cursor).
+        sendkey `ls`/`ps`/`diskread 0` round-trips through the pty and the
+        markers land on serial; screendump shows the shell text in the
+        window. Pty log lines are printed with IF=0 (the timer IRQ was
+        splitting them mid-line). test-boot + test-crash PASS.
+  - [ ] **7c** — Files (Navigator) over VFS+AHCI in a window + launcher
+        polish; C++ widget toolkit + Text Editor / System Settings apps.
 - [ ] **Phase 8: Polish & extras** — virtio-net + TCP/IP, SMP, power
       management, optional Rust modules, installer ISO, VirtualBox/real
       hardware testing.
