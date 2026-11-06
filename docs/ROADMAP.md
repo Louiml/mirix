@@ -173,7 +173,41 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         runs `SYS_diskread(0,8)` (`ahci LBA 0 read 4096 bytes, magic
         'MIRIXAHCI0'`). Window-content click hit-testing lives in aurora.
         test-boot + test-crash PASS.
-  - [ ] **7d** — C++ widget toolkit + Text Editor / System Settings apps.
+   - [x] **7d** - C++ widget toolkit + Text Editor / System Settings apps.
+         `user/mixtk.{h,cpp}` is a freestanding C++17 toolkit (clang++,
+         `-fno-exceptions -fno-rtti -fno-threadsafe-statics`, no libc): syscall
+         wrappers, 8x8-font drawing (px/rect/rrect/circle/text) and a small
+         widget set (`Label`/`Button`/`Toggle`/`App`) that paints into the
+         kernel window buffer; it also provides the compiler-emitted shims
+         (`memset/memcpy/memmove/memcmp/strlen`, `__cxa_pure_virtual`,
+         `atexit`, sized `operator delete`). C++ globals are started by an
+         `.init_array` loop in `user/start.asm` (all `user/*.ld` export
+         `__init_array_start/end`). Apps are LINKED INTO the aurora binary
+         (no exec syscall exists) and driven by aurora's input loop through
+         `extern "C"` hooks in `user/apps.h`. Dock grows to 6 icons:
+         About / Clock / Files / Terminal / **Editor** / **Settings**.
+         **Editor** (`user/editor.cpp`): loads `/notes.txt`, autosaves on
+         every edit (`aurora: editor: saved /notes.txt (N)`), Enter logs
+         `aurora: editor: line 'hi'`, backspace joins lines, click positions
+         the cursor; keystrokes route to it while its window is focused.
+         **Settings** (`user/settings.cpp`): three toggles (clock seconds,
+         dark terminal, dock magnification) that apply live through
+         `aurora_set_*` hooks and persist to `/settings.cfg`
+         (`aurora: settings: 'clock seconds' -> off` + `saved`). Window
+         zoom re-attaches the app; closing the window detaches it.
+         `tools/test_boot.py` drives the whole thing headless (dock clicks,
+         typing, toggles) and `ok_7d` checks all markers; test-boot,
+         test-crash, test-poweroff PASS.
+         **SMP flake root-caused & fixed (this phase)**: the sporadic #UD
+         under `-smp 4` was NOT a syscall-entry bug - STAR/LSTAR/SFMASK/
+         EFER.SCE are per-vCPU MSRs, but `syscall_init()` ran from kmain
+         after `smp_wait_online()`, by which time the scheduler had
+         migrated the main thread to an AP, so the boot vCPU (apicid 0)
+         never got SCE and the first user `syscall`/`sysretq` on it #UD'd
+         (~1 in 4-8 boots). Fix: `smp_bsp_init()` calls `syscall_init_cpu()`
+         on the boot vCPU BEFORE releasing the APs (kmain is guaranteed to
+         still be on it); APs already do it in `ap_entry()`. Verified:
+         10/10 + 5/5 `-smp 4` boots with zero exceptions.
 - [ ] **Phase 8: Polish & extras**
   - [x] **8a** — e1000 NIC driver (`kernel/drivers/e1000.c`, 8086:10d3 —
         q35's *default* NIC on slirp user-net). BAR0 MMIO mapped at

@@ -420,6 +420,53 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
   are printed with IF=0 because the timer IRQ preempts mid-`uart_printf`
   and splits the line, breaking the serial greps.
 
+## C++ widget toolkit + apps (Phase 7d, done)
+
+- `user/mixtk.{h,cpp}`: freestanding C++17 toolkit compiled with clang++
+  (`-fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit
+  -fno-asynchronous-unwind-tables`, `-Wno-c++11-narrowing` for the public-
+  domain font header's signed-char rows). Provides syscall wrappers
+  (`sys::write/open/read/close/win_*/uptime/log`), drawing
+  (`gfx::px/rect/rrect/circle/text` on a window `Surf`), widgets
+  (`Label`, `Button` with `on_activate`, `Toggle` with `on_change`, and an
+  `App` base owning one kernel window) and the runtime shims clang emits
+  (`memset/memcpy/memmove/memcmp/strlen`, `__cxa_pure_virtual`, `atexit`,
+  sized `operator delete` for the virtual destructors).
+- C++ global ctors: `user/start.asm` runs the `.init_array` section
+  (every `user/*.ld` exports `__init_array_start/end`; empty for C-only
+  programs, so hello/shell are unaffected).
+- Apps are **linked into the aurora binary** (there is no exec syscall):
+  `Makefile` builds `aurora.elf` from `start.o + aurora.o + mixtk/editor/
+  settings .cxx.o`. aurora.c (C) drives them via `extern "C"` hooks declared
+  in `user/apps.h` (`editor_attach/key/click/paint`, `settings_attach/click/
+  paint`, `aurora_set_clock_seconds/term_dark/dock_magnify`).
+- Dock = 6 icons (About/Clock/Files/Terminal/Editor/Settings). Clicking
+  Editor/Settings opens (or focuses) the app window and attaches the app;
+  closing the window detaches it; zoom re-attaches at the new size.
+  Keyboard events route to the Editor while its window is focused
+  (`kbd_editor`), otherwise to the pty (mirsh). Content clicks dispatch to
+  the app (`editor_click`/`settings_click`).
+- Editor: `/notes.txt` on the ramdisk, loaded on open, **autosaved on every
+  keystroke**; Enter logs the line, backspace joins lines, click positions
+  the 8x8-glyph cursor, Save button forces a save.
+- Settings: three `Toggle` rows (clock seconds, dark terminal, dock
+  magnification) that call the `aurora_set_*` hooks immediately and persist
+  `clock=/dark=/mag=` lines to `/settings.cfg` (loaded at open).
+- Test: `tools/test_boot.py` clicks dock icon 4 (Editor), clicks its window,
+  types `hi`+Enter (markers `editor: line 'hi'`, `editor: saved /notes.txt`),
+  then dock icon 5 (Settings) and toggles the first row (`'clock seconds' ->
+  off`, `saved /settings.cfg`); `ok_7d` folds these into the serial check.
+- **SMP flake fix (root cause of the sporadic #UD since 8c)**: the SYSCALL
+  MSRs (EFER.SCE/STAR/LSTAR/SFMASK) are per-vCPU, but they were only written
+  by `syscall_init()` from kmain — which runs *after* `smp_wait_online()`,
+  by which point the scheduler may have migrated the main thread to an AP.
+  The boot vCPU (apicid 0) then never got SCE, and the first user
+  `syscall` (or a migrated mid-syscall `sysretq`) on it raised #UD
+  (~1 in 4-8 boots). Fix: `smp_bsp_init()` now calls `syscall_init_cpu()` on
+  the boot vCPU **before** releasing the APs (kmain is guaranteed to still
+  be running there); APs already call it in `ap_entry()`. Verified with
+  10/10 + 5/5 clean `-smp 4` boots, zero exceptions.
+
 ## Driver list
 
 | Device | Driver | Phase |
@@ -435,6 +482,7 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | TrueType renderer | `kernel/lib/ttf.c` | 6c (done) |
 | Window manager / compositor | `kernel/gui/wm.c` | 7a (done) |
 | Aurora desktop process | `user/aurora.c` | 7a (done) |
+| mixtk C++ toolkit + Editor/Settings apps | `user/mixtk.cpp`, `user/editor.cpp`, `user/settings.cpp` | 7d (done) |
 | Framebuffer TTY (serial mirror) | `kernel/drivers/fb.c`, `lib/uart.c` | 5b (done) |
 | mirsh shell | `user/shell.c` | 5a (done) |
 | e1000 NIC (polled, ARP) | `kernel/drivers/e1000.c` | 8a (done) |
