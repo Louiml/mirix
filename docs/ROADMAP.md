@@ -164,11 +164,24 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         markers land on serial; screendump shows the shell text in the
         window. Pty log lines are printed with IF=0 (the timer IRQ was
         splitting them mid-line). test-boot + test-crash PASS.
-  - [ ] **7c** — Files (Navigator) over VFS+AHCI in a window + launcher
-        polish; C++ widget toolkit + Text Editor / System Settings apps.
-- [ ] **Phase 8: Polish & extras** — virtio-net + TCP/IP, SMP, power
-      management, optional Rust modules, installer ISO, VirtualBox/real
-      hardware testing.
+  - [x] **7c** — Files (Navigator) + launcher: Dock is now
+        About / Clock / **Files** / Terminal. Clicking Files opens a window
+        listing `/` via `SYS_getdents` (`aurora: files: 1 entries in /`),
+        one row per file plus an `[ahci0 SATA disk — LBA 0]` row; clicking a
+        row `open()`s/`read()`s the file and previews its content
+        (`read 'hello.txt' (16 bytes): mirixfs says hi.`); the disk row
+        runs `SYS_diskread(0,8)` (`ahci LBA 0 read 4096 bytes, magic
+        'MIRIXAHCI0'`). Window-content click hit-testing lives in aurora.
+        test-boot + test-crash PASS.
+  - [ ] **7d** — C++ widget toolkit + Text Editor / System Settings apps.
+- [ ] **Phase 8: Polish & extras**
+  - [ ] **8a** — e1000 NIC driver (8086:10d3, already enumerated on PCI):
+        MMIO BAR0, RX/TX descriptor rings in contiguous PMM, ARP exchange
+        against QEMU user-net gateway 10.0.2.2 as the boot test.
+  - [ ] **8b** — ACPI S5 poweroff (RSDP via Limine → XSDT → FADT →
+        PM1a_CNT SLP_TYP), `cmdline: poweroff` makes QEMU exit cleanly.
+  - [ ] **8c** — SMP (`-smp 4`, Limine SMP request, per-AP lidt/TSS/LAPIC,
+        spinlocks around scheduler + heap + uart).
 
 ## Definition of done (v1.0)
 
