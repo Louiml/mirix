@@ -44,6 +44,8 @@ static long syscall6(long nr, long a1, long a2, long a3, long a4, long a5, long 
 #define SYS_open       4
 #define SYS_read       5
 #define SYS_close      6
+#define SYS_getdents   7
+#define SYS_diskread   9
 #define SYS_fbinfo    11
 #define SYS_getevent  12
 #define SYS_mousepos  13
@@ -70,6 +72,7 @@ static long sys_getevent(void *b) { return syscall3(SYS_getevent, (long)b, 0, 0)
 static long sys_open(const char *p, long fl) { return syscall3(SYS_open, (long)p, fl, 0); }
 static long sys_read(long fd, void *b, long n) { return syscall3(SYS_read, fd, (long)b, n); }
 
+#define O_RDONLY 0
 #define O_RDWR 2
 static long sys_mousepos(void *b) { return syscall3(SYS_mousepos, (long)b, 0, 0); }
 static long sys_win_create(int x, int y, int w, int h, const char *t, int fl)
@@ -263,7 +266,7 @@ static void draw_uptime(awin_t *a)
 }
 
 #define DOCK_ICONS 4
-static const char *dock_names[DOCK_ICONS] = { "About", "Clock", "Notes", "Shell" };
+static const char *dock_names[DOCK_ICONS] = { "About", "Clock", "Files", "Terminal" };
 static const uint32_t dock_cols[DOCK_ICONS] = { 0x30ffa0, 0x40d0ff, 0xb060ff, 0xff9f40 };
 
 static void draw_dock(awin_t *d, int mx, int hover_icon)
@@ -299,16 +302,149 @@ static void draw_dock(awin_t *d, int mx, int hover_icon)
     }
 }
 
-static void draw_notes(awin_t *a)
+/* ---------------- Files (Navigator) window — Phase 7c ---------------- */
+typedef struct { char name[32]; uint32_t size; uint8_t type; uint8_t pad[3]; } dirent_t;
+
+#define FILES_HDR  24
+#define FILES_ROWH 12
+static dirent_t fents[32];
+static int  nfents;
+static char fcontent[512];
+static int  fclen;
+
+static int eqs(const char *a, const char *b)
+{
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+
+static awin_t *find_title(const char *t)
+{
+    for (int i = 0; i < MAXW; i++)
+        if (wins[i].used && wins[i].title && eqs(wins[i].title, t))
+            return &wins[i];
+    return 0;
+}
+
+static void files_refresh(void)
+{
+    nfents = 0;
+    fclen = 0;
+    long fd = sys_open("/", O_RDONLY);
+    if (fd < 0)
+        return;
+    char dbuf[1024];
+    long nb = syscall3(SYS_getdents, fd, (long)dbuf, (long)sizeof dbuf);
+    syscall3(SYS_close, fd, 0, 0);
+    if (nb <= 0)
+        return;
+    long cnt = nb / (long)sizeof(dirent_t);
+    if (cnt > 32)
+        cnt = 32;
+    for (long i = 0; i < cnt; i++)
+        fents[i] = *(dirent_t *)(dbuf + i * (long)sizeof(dirent_t));
+    nfents = (int)cnt;
+    char m[80]; long n = 0;
+    n = acpy(m, n, "aurora: files: ");
+    n = adec(m, n, nfents);
+    n = acpy(m, n, " entries in /\n");
+    sys_write(1, m, n);
+}
+
+static void files_open_row(int row)
+{
+    if (row < 0)
+        return;
+    if (row < nfents) {
+        long fd = sys_open(fents[row].name, O_RDONLY);
+        if (fd < 0) {
+            puts("aurora: files: open failed\n");
+            return;
+        }
+        fclen = sys_read(fd, fcontent, (long)sizeof fcontent - 1);
+        syscall3(SYS_close, fd, 0, 0);
+        if (fclen < 0)
+            fclen = 0;
+        fcontent[fclen] = 0;
+        char m[160]; long n = 0;
+        n = acpy(m, n, "aurora: files: read '");
+        n = acpy(m, n, fents[row].name);
+        n = acpy(m, n, "' (");
+        n = adec(m, n, fclen);
+        n = acpy(m, n, " bytes): ");
+        for (long i = 0; i < fclen && n < 140; i++) {
+            char c = fcontent[i];
+            m[n++] = (c == '\n' || c < 32 || c >= 127) ? '.' : c;
+        }
+        n = acpy(m, n, "\n");
+        sys_write(1, m, n);
+    } else {
+        /* the row after the last file = the AHCI SATA disk */
+        static char dbuf[8 * 512];
+        long nrd = syscall3(SYS_diskread, 0, 8, (long)dbuf);
+        char m[96]; long n = 0;
+        n = acpy(m, n, "aurora: files: ahci LBA 0 read ");
+        n = adec(m, n, nrd);
+        n = acpy(m, n, " bytes, magic '");
+        for (int i = 0; i < 10 && i < nrd; i++) {
+            char c = dbuf[i];
+            m[n++] = (c >= 32 && c < 127) ? c : '.';
+        }
+        n = acpy(m, n, "'\n");
+        sys_write(1, m, n);
+    }
+}
+
+static void draw_files(awin_t *a)
 {
     uint32_t *b = a->buf;
     int w = a->w, h = a->h;
-    wrect(b, w, h, 0, 0, w, h, 0xfffbe8);
-    wtext(b, w, h, 12, 12, 2, 0x554422, "Notes");
-    wtext(b, w, h, 12, 40, 1, 0x443322, "- boot in QEMU: make run-headless");
-    wtext(b, w, h, 12, 52, 1, 0x443322, "- mirsh: ls / ps diskread 0");
-    wtext(b, w, h, 12, 64, 1, 0x443322, "- windows drag by the title bar");
-    wtext(b, w, h, 12, 84, 1, 0x886655, "Aurora desktop, phase 7a");
+    wrect(b, w, h, 0, 0, w, h, 0xf4f4f8);
+    char hdr[64]; long hn = 0;
+    hn = acpy(hdr, hn, "Files - / (");
+    hn = adec(hdr, hn, nfents);
+    hn = acpy(hdr, hn, " entries)");
+    hdr[hn] = 0;
+    wtext(b, w, h, 8, 6, 1, 0x3a3a44, hdr);
+    wrect(b, w, h, 4, FILES_HDR - 4, w - 8, 1, 0xc0c0cc);
+    for (int i = 0; i <= nfents; i++) {
+        int y = FILES_HDR + i * FILES_ROWH;
+        if (y + FILES_ROWH > h)
+            break;
+        if (i == nfents) {
+            wrect(b, w, h, 4, y, w - 8, FILES_ROWH - 2, 0xffe8c8);
+            wtext(b, w, h, 10, y + 2, 1, 0x8a5a10, "[ahci0 SATA disk - LBA 0]");
+        } else {
+            wrect(b, w, h, 4, y, w - 8, FILES_ROWH - 2, 0xe8e8f0);
+            char row[64]; long rn = 0;
+            rn = acpy(row, rn, fents[i].name);
+            rn = acpy(row, rn, "  (");
+            rn = adec(row, rn, (long)fents[i].size);
+            rn = acpy(row, rn, " B)");
+            row[rn] = 0;
+            wtext(b, w, h, 10, y + 2, 1, 0x2a2a33, row);
+        }
+    }
+    /* content preview of the last opened file */
+    int cy = FILES_HDR + (nfents + 1) * FILES_ROWH + 6;
+    if (cy < h) {
+        wrect(b, w, h, 4, cy - 4, w - 8, 1, 0xc0c0cc);
+        int cx = 8, cyy = cy + 2;
+        for (int i = 0; i < fclen && cyy + 8 <= h; i++) {
+            char c = fcontent[i];
+            if (c == '\n' || cx + 8 > w - 8) {
+                cx = 8;
+                cyy += 8;
+                if (cyy + 8 > h)
+                    break;
+                if (c == '\n')
+                    continue;
+            }
+            char s[2] = { (c >= 32 && c < 127) ? c : '.', 0 };
+            wtext(b, w, h, cx, cyy, 1, 0x1a4a2a, s);
+            cx += 8;
+        }
+    }
 }
 
 /* ---------------- terminal window (Phase 7b) ---------------- */
@@ -522,7 +658,8 @@ long main(void)
                         sys_write(1, m, n);
                         if (hit->title[0] == 'U') draw_uptime(hit);
                         else if (hit->title[0] == 'A') draw_about(hit);
-                        else draw_notes(hit);
+                        else if (hit->title[0] == 'F') { files_refresh(); draw_files(hit); }
+                        else if (hit->title[0] == 'T') draw_term(hit);
                         sys_win_commit(wid);
                     } else {
                         drag_wid = wid;
@@ -532,6 +669,16 @@ long main(void)
                     }
                 } else {
                     sys_win_focus(wid);
+                    /* Files window: click a row to open the file / disk */
+                    awin_t *fw = find_title("Files");
+                    if (hit == fw) {
+                        int row = (ly - WM_TITLE_H - FILES_HDR) / FILES_ROWH;
+                        if (row >= 0 && row <= nfents) {
+                            files_open_row(row);
+                            draw_files(hit);
+                            sys_win_commit(hit->wid);
+                        }
+                    }
                 }
             } else if (hit && hit->frameless) {
                 /* dock click: which icon? */
@@ -546,15 +693,30 @@ long main(void)
                         n = acpy(m, n, dock_names[i]);
                         n = acpy(m, n, "'\n");
                         sys_write(1, m, n);
-                        if (i == 0 && find_wid(about->wid)) sys_win_focus(about->wid);
-                        else if (i == 1 && find_wid(clock->wid)) sys_win_focus(clock->wid);
-                        else if (i == 2) {
-                            awin_t *nt = add_win(700, 300, 320, 200, "Notes", 0);
-                            if (nt) { draw_notes(nt); sys_win_commit(nt->wid); sys_win_focus(nt->wid); }
+                        if (i == 0) {
+                            if (find_wid(about->wid)) sys_win_focus(about->wid);
+                        } else if (i == 1) {
+                            if (find_wid(clock->wid)) sys_win_focus(clock->wid);
+                        } else if (i == 2) {
+                            /* Files (Navigator) */
+                            awin_t *fw = find_title("Files");
+                            if (!fw) {
+                                fw = add_win(640, 200, 360, 300, "Files", 0);
+                                if (fw) {
+                                    files_refresh();
+                                    draw_files(fw);
+                                    sys_win_commit(fw->wid);
+                                    sys_win_focus(fw->wid);
+                                    puts("aurora: dock launch 'Files'\n");
+                                }
+                            } else {
+                                sys_win_focus(fw->wid);
+                                puts("aurora: dock launch 'Files' (already open, focused)\n");
+                            }
                         } else if (i == 3) {
                             if (term && find_wid(term->wid)) {
                                 sys_win_focus(term->wid);
-                                puts("aurora: dock launch 'Shell' -> Terminal window focused\n");
+                                puts("aurora: dock launch 'Terminal'\n");
                             }
                         }
                         break;

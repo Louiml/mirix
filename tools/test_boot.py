@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 7b: kernel entered"
+BANNER = "MirixOS phase 7c: kernel entered"
 
 HD = BUILD / "mirix.img"
 
@@ -199,7 +199,21 @@ def main() -> int:
             mcmd("mouse_button 1")
             mcmd("mouse_button 0")
             wait_for(("aurora: closed win",))
-            mcmd("mouse_move 66 256")           # -> back to (640,360)
+
+            # Phase 7c: Files (Navigator) over VFS + AHCI
+            mcmd("mouse_move 95 566")           # -> (669,670): dock icon 2 (Files)
+            mcmd("mouse_button 1")
+            mcmd("mouse_button 0")
+            wait_for(("aurora: dock launch 'Files'", "aurora: files: 1 entries in /"))
+            mcmd("mouse_move 31 -412")          # -> (700,258): hello.txt row
+            mcmd("mouse_button 1")
+            mcmd("mouse_button 0")
+            wait_for(("aurora: files: read 'hello.txt' (16 bytes)",))
+            mcmd("mouse_move 0 12")             # -> (700,270): [ahci0] row
+            mcmd("mouse_button 1")
+            mcmd("mouse_button 0")
+            wait_for(("aurora: files: ahci LBA 0 read 4096 bytes, magic 'MIRIXAHCI0'",))
+            mcmd("mouse_move -60 90")           # -> back to (640,360)
             time.sleep(0.5)
             s.sendall(f"screendump {SHOT_TMP}\n".encode())
             try:
@@ -295,6 +309,13 @@ def main() -> int:
         and "ls: 1 entries" in serial
         and "disk: LBA 0 read 4096 bytes" in serial
     )
+    # Phase 7c: Files window lists /, click-to-cat hello.txt, AHCI disk row
+    ok_files = (
+        "aurora: dock launch 'Files'" in serial
+        and "aurora: files: 1 entries in /" in serial
+        and "aurora: files: read 'hello.txt' (16 bytes)" in serial
+        and "aurora: files: ahci LBA 0 read 4096 bytes, magic 'MIRIXAHCI0'" in serial
+    )
     ok_ahci = (
         "ahci: port 0 online" in serial
         and "ahci: LBA 0 read OK (4096 bytes), magic='MIRIXAHCI0" in serial
@@ -321,6 +342,7 @@ def main() -> int:
         and ok_ttf
         and ok_aurora
         and ok_pty
+        and ok_files
     )
 
     ok_screen = False
