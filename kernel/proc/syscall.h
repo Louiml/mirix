@@ -15,6 +15,8 @@
 #define SYS_getdents 7
 #define SYS_ps       8
 #define SYS_diskread 9   /* (lba, nsec, buf) -> bytes read from AHCI disk */
+#define SYS_flip    10   /* present the back buffer to the screen */
+#define SYS_fbinfo  11   /* (w, h, bpp) out via 3 ints in buf */
 
 void syscall_init(void);
 

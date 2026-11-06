@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 4c: kernel entered"
+BANNER = "MirixOS phase 6a: kernel entered"
 
 HD = BUILD / "mirix.img"
 
@@ -232,6 +232,10 @@ def main() -> int:
         and "fsdemo: read back: mirixfs says hi" in serial
         and "fsdemo: ls / (1 entries): hello.txt" in serial
     )
+    ok_fb6 = (
+        "fb: double buffer ready (1280x720" in serial
+        and "lapic: timer started" in serial
+    )
     ok_ahci = (
         "ahci: port 0 online" in serial
         and "ahci: LBA 0 read OK (4096 bytes), magic='MIRIXAHCI0" in serial
@@ -254,6 +258,7 @@ def main() -> int:
         and ok_shell
         and ok_fs
         and ok_ahci
+        and ok_fb6
     )
 
     ok_screen = False

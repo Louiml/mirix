@@ -28,6 +28,15 @@ void fb_printf(const char *fmt, ...);
 #define FB_HEADER_PX 16
 void fb_draw_header(void);
 
+/* Phase 6a: double buffering. All drawing goes to a back buffer; fb_present()
+ * copies it to the visible framebuffer. Call fb_enable_double_buffer() once
+ * the heap is up (before that, drawing goes straight to the front buffer). */
+void fb_enable_double_buffer(void);
+void fb_present(void);          /* back -> front, if dirty */
+int  fb_dirty(void);
+void fb_set_cursor(int x, int y, int visible);   /* 6b: mouse cursor */
+void fb_draw_cursor(void);                        /* composited on present */
+
 /* Serial->screen mirror: when on, uart_putc also renders each char to the
  * scrolling fb console. Panic paths turn it off so the red screen stays clean. */
 void fb_set_mirror(int on);

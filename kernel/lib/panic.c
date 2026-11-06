@@ -38,6 +38,7 @@ void kpanic(const char *fmt, ...)
         fb_puts("\n  KERNEL PANIC\n\n");
         fb_puts(msg);
         fb_puts("\n");
+        fb_present();   /* double-buffered: push the red screen to the front */
     }
 
     uart_printf("halting.\n");
@@ -92,6 +93,7 @@ void panic_dump_regs(registers_t *r)
         fb_printf("r13=%llx r14=%llx r15=%llx\n",
                   (unsigned long long)r->r13, (unsigned long long)r->r14,
                   (unsigned long long)r->r15);
+        fb_present();   /* double-buffered: push the red screen to the front */
     }
 
     uart_printf("halting.\n");

@@ -87,7 +87,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 4c: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 6a: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -161,6 +161,15 @@ void _start(void)
         uart_printf("heap: %llu blocks, %llu B used, %llu B free\n",
                     (unsigned long long)n, (unsigned long long)u,
                     (unsigned long long)f);
+    }
+
+    /* Phase 6a: double buffer — back buffer allocated from the heap; the
+     * main loop presents it (fb_present) so uart/fb drawing never tears. */
+    if (fb_ready()) {
+        fb_enable_double_buffer();
+        uart_printf("fb: double buffer ready (%ux%u, back buffer %llu KiB), main loop presents\n",
+                    fb_width(), fb_height(),
+                    (unsigned long long)((uint64_t)fb_width() * fb_height() * 4 / 1024));
     }
 
     /* VMM round-trip: map a scratch page, write through it, read back,
@@ -259,6 +268,7 @@ void _start(void)
     int alive_n = 0;
     for (;;) {
         msleep(20);
+        fb_present();   /* Phase 6a: back -> front (~50 Hz) */
         /* keyboard events are consumed by the shell via read(0) */
         if (++alive_n % 25 == 0)   /* every ~500 ms */
             uart_printf("[main] alive: %llu switches, %llu ticks\n",

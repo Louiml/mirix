@@ -8,6 +8,7 @@
 #include "fs/vfs.h"
 #include "drivers/ps2.h"
 #include "drivers/ahci.h"
+#include "drivers/fb.h"
 #include "mm/pmm.h"
 #include "mm/mm.h"
 
@@ -148,6 +149,19 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
         for (uint64_t p = blk; p < blk + pages * PAGE_SIZE; p += PAGE_SIZE)
             pmm_free_page(p);
         return (uint64_t)n;
+    }
+    case SYS_flip:
+        fb_present();
+        return 0;
+    case SYS_fbinfo: {
+        uint64_t buf = a1;
+        if (!is_user_addr(buf) || !is_user_addr(buf + 12))
+            return (uint64_t)-2;
+        uint32_t *out = (uint32_t *)buf;
+        out[0] = fb_width();
+        out[1] = fb_height();
+        out[2] = 32;
+        return 0;
     }
     case SYS_gettid:
         return (uint64_t)current_thread_id();

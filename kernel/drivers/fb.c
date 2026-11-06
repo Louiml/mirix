@@ -1,6 +1,7 @@
 #include "fb.h"
 #include "lib/string.h"
 #include "lib/printf.h"
+#include "mm/kmalloc.h"
 
 #include <stdarg.h>
 
@@ -16,6 +17,17 @@ static int g_ok;
 static uint32_t g_cur_x, g_cur_y;
 static uint32_t g_fg = 0xffffff;
 static int g_mirror = 1;   /* uart_putc mirrors to the fb console when set */
+
+/* Phase 6a: back buffer (allocated once the heap exists). All drawing goes
+ * to g_draw (back buffer if present, else the front buffer directly). */
+static uint32_t *g_back;
+static uint32_t *g_draw;
+static int g_dirty;
+
+/* Phase 6b: mouse cursor, composited onto the front buffer at present time
+ * (never into the back buffer, so it doesn't smear). */
+static int g_cur_on;
+static int g_mx, g_my;
 
 /* Scale an 8-bit channel into a mask of `size` bits. */
 static uint32_t scale_channel(uint32_t v8, uint32_t size)
@@ -46,6 +58,9 @@ void fb_init(struct limine_framebuffer *fb)
     g_ok = (fb->memory_model == LIMINE_FRAMEBUFFER_RGB && g_bytespp <= 4);
     g_cur_x = 0;
     g_cur_y = FB_HEADER_PX;   /* text area starts below the status strip */
+    g_back = 0;
+    g_draw = (uint32_t *)fb->address;   /* single-buffered until heap is up */
+    g_dirty = 0;
 }
 
 int fb_ready(void) { return g_ok; }
@@ -57,9 +72,10 @@ void fb_putpixel(uint32_t x, uint32_t y, uint32_t rgb)
     if (!g_ok || x >= g_w || y >= g_h)
         return;
     uint32_t px = pack(rgb);
-    uint8_t *dst = (uint8_t *)g_fb->address + y * g_pitch + x * g_bytespp;
+    uint8_t *dst = (uint8_t *)g_draw + y * g_pitch + x * g_bytespp;
     for (uint32_t i = 0; i < g_bytespp; i++)   /* little-endian store */
         dst[i] = (uint8_t)(px >> (8 * i));
+    g_dirty = 1;
 }
 
 void fb_clear(uint32_t rgb)
@@ -68,7 +84,7 @@ void fb_clear(uint32_t rgb)
         return;
     uint32_t px = pack(rgb);
     for (uint32_t y = 0; y < g_h; y++) {
-        uint8_t *row = (uint8_t *)g_fb->address + y * g_pitch;
+        uint8_t *row = (uint8_t *)g_draw + y * g_pitch;
         for (uint32_t x = 0; x < g_w; x++) {
             for (uint32_t i = 0; i < g_bytespp; i++)
                 row[x * g_bytespp + i] = (uint8_t)(px >> (8 * i));
@@ -76,6 +92,7 @@ void fb_clear(uint32_t rgb)
     }
     g_cur_x = 0;
     g_cur_y = FB_HEADER_PX;
+    g_dirty = 1;
 }
 
 void fb_draw_header(void)
@@ -122,7 +139,7 @@ static void fb_scroll(void)
     uint32_t top = FB_HEADER_PX;
     if (g_cur_y + line <= g_h)
         return;
-    uint8_t *fb = g_fb->address;
+    uint8_t *fb = (uint8_t *)g_draw;
     memmove(fb + top * g_pitch,
             fb + (top + line) * g_pitch,
             (size_t)(g_h - top - line) * g_pitch);
@@ -135,6 +152,7 @@ static void fb_scroll(void)
                 row[x * g_bytespp + i] = (uint8_t)(bg >> (8 * i));
     }
     g_cur_y -= line;
+    g_dirty = 1;
 }
 
 void fb_putc(char c)
@@ -181,3 +199,93 @@ void fb_printf(const char *fmt, ...)
 
 void fb_set_mirror(int on) { g_mirror = on; }
 int  fb_mirror(void)        { return g_mirror; }
+
+/* ---- Phase 6a: double buffering ---- */
+
+void fb_enable_double_buffer(void)
+{
+    if (!g_ok || g_back)
+        return;
+    size_t bytes = (size_t)g_w * g_h * g_bytespp;
+    g_back = kmalloc(bytes);
+    if (!g_back) {
+        g_draw = (uint32_t *)g_fb->address;
+        return;
+    }
+    /* start the back buffer as a copy of the current front */
+    memcpy(g_back, g_fb->address, bytes);
+    g_draw = g_back;
+    g_dirty = 1;
+}
+
+int fb_dirty(void) { return g_dirty; }
+
+/* Simple 12x19 arrow cursor bitmap (1 = white, 2 = black outline). */
+static const uint8_t cursor_bmp[19][12] = {
+    {2,0,0,0,0,0,0,0,0,0,0,0},
+    {2,2,0,0,0,0,0,0,0,0,0,0},
+    {2,1,2,0,0,0,0,0,0,0,0,0},
+    {2,1,1,2,0,0,0,0,0,0,0,0},
+    {2,1,1,1,2,0,0,0,0,0,0,0},
+    {2,1,1,1,1,2,0,0,0,0,0,0},
+    {2,1,1,1,1,1,2,0,0,0,0,0},
+    {2,1,1,1,1,1,1,2,0,0,0,0},
+    {2,1,1,1,1,1,1,1,2,0,0,0},
+    {2,1,1,1,1,1,1,1,1,2,0,0},
+    {2,1,1,1,1,1,2,2,2,2,2,0},
+    {2,1,1,1,1,2,0,0,0,0,0,0},
+    {2,1,1,2,1,1,2,0,0,0,0,0},
+    {2,1,2,0,2,1,1,2,0,0,0,0},
+    {2,2,0,0,2,1,1,2,0,0,0,0},
+    {0,0,0,0,2,1,1,2,0,0,0,0},
+    {0,0,0,0,2,1,1,1,2,0,0,0},
+    {0,0,0,0,0,2,1,1,1,2,0,0},
+    {0,0,0,0,0,2,2,2,2,2,2,0},
+};
+
+void fb_set_cursor(int x, int y, int visible)
+{
+    if (g_mx != x || g_my != y || g_cur_on != visible)
+        g_dirty = 1;   /* front must be re-copied so the old cursor erases */
+    g_mx = x;
+    g_my = y;
+    g_cur_on = visible;
+}
+
+static void blit_front_pixel(uint32_t x, uint32_t y, uint32_t rgb)
+{
+    if (x >= g_w || y >= g_h)
+        return;
+    uint32_t px = pack(rgb);
+    uint8_t *dst = (uint8_t *)g_fb->address + y * g_pitch + x * g_bytespp;
+    for (uint32_t i = 0; i < g_bytespp; i++)
+        dst[i] = (uint8_t)(px >> (8 * i));
+}
+
+/* Draw the cursor straight onto the front buffer (over the freshly copied
+ * back buffer). Called only from fb_present, so it never accumulates. */
+void fb_draw_cursor(void)
+{
+    if (!g_ok || !g_cur_on)
+        return;
+    for (int gy = 0; gy < 19; gy++)
+        for (int gx = 0; gx < 12; gx++) {
+            uint8_t v = cursor_bmp[gy][gx];
+            if (!v)
+                continue;
+            blit_front_pixel((uint32_t)g_mx + gx, (uint32_t)g_my + gy,
+                             v == 1 ? 0xffffff : 0x000000);
+        }
+}
+
+void fb_present(void)
+{
+    if (!g_ok || !g_back)
+        return;
+    if (!g_dirty)
+        return;
+    size_t bytes = (size_t)g_w * g_h * g_bytespp;
+    memcpy(g_fb->address, g_back, bytes);
+    g_dirty = 0;
+    fb_draw_cursor();
+}
