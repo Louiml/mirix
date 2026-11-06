@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 4b: kernel entered"
+BANNER = "MirixOS phase 5a: kernel entered"
 
 
 def strip_ansi(data: bytes) -> str:
@@ -126,29 +126,38 @@ def main() -> int:
             time.sleep(0.1)
         time.sleep(0.5)  # let the kernel finish drawing
 
-        # QEMU monitor: inject keystrokes into the emulated PS/2 keyboard,
-        # wait for the kernel's [kbd] echo lines, then screendump.
+        # QEMU monitor: type into the emulated PS/2 keyboard; the mirsh shell
+        # reads them via read(0). Run "ls" then "ps", wait for their output.
         if MON.exists() and booted:
             s = socket.socket(socket.AF_UNIX)
             s.settimeout(5)
             s.connect(str(MON))
-            for key in ("h", "i", "spc", "ret"):
-                s.sendall(f"sendkey {key}\n".encode())
-                try:
-                    s.recv(4096)
-                except socket.timeout:
-                    pass
-                time.sleep(0.3)
-            kbd_marks = ("[kbd] 'h'", "[kbd] 'i'", "[kbd] SPACE", "[kbd] ENTER")
-            for _ in range(100):
-                try:
-                    if SERIAL.exists():
-                        cur = strip_ansi(SERIAL.read_bytes())
-                        if all(m in cur for m in kbd_marks):
-                            break
-                except OSError:
-                    pass
-                time.sleep(0.1)
+
+            def send_keys(keys):
+                for key in keys:
+                    s.sendall(f"sendkey {key}\n".encode())
+                    try:
+                        s.recv(4096)
+                    except socket.timeout:
+                        pass
+                    time.sleep(0.25)
+
+            def wait_for(marks, tries=150):
+                for _ in range(tries):
+                    try:
+                        if SERIAL.exists():
+                            cur = strip_ansi(SERIAL.read_bytes())
+                            if all(m in cur for m in marks):
+                                return True
+                    except OSError:
+                        pass
+                    time.sleep(0.1)
+                return False
+
+            send_keys(("l", "s", "ret"))
+            wait_for(("ls: 1 entries", "  hello.txt (16 bytes)"))
+            send_keys(("p", "s", "ret"))
+            wait_for(("name=shell", "name=userA"))
             s.sendall(f"screendump {SHOT_TMP}\n".encode())
             try:
                 s.recv(4096)
@@ -201,12 +210,13 @@ def main() -> int:
         and re.search(r"class=01\.", serial) is not None   # AHCI/SATA
         and re.search(r"class=02\.", serial) is not None   # NIC
     )
-    ok_kbd = (
+    ok_shell = (
         "ps2: keyboard ready" in serial
-        and "[kbd] 'h'" in serial
-        and "[kbd] 'i'" in serial
-        and "[kbd] SPACE" in serial
-        and "[kbd] ENTER" in serial
+        and "mirsh ready" in serial
+        and "ls: 1 entries" in serial
+        and "  hello.txt (16 bytes)" in serial
+        and "ps: id=5 name=shell state=RUNNING" in serial
+        and "name=userA" in serial
     )
     ok_fs = (
         "vfs: ramdisk ready" in serial
@@ -228,7 +238,7 @@ def main() -> int:
         and ok_sched
         and ok_user
         and ok_pci
-        and ok_kbd
+        and ok_shell
         and ok_fs
     )
 

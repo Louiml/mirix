@@ -13,6 +13,7 @@
 #define SYS_read     5
 #define SYS_close    6
 #define SYS_getdents 7
+#define SYS_ps       8
 
 void syscall_init(void);
 

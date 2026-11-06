@@ -41,4 +41,13 @@ int       proc_fd_close(int fd);
 int       proc_fd_vnode(int fd);        /* vnode index or -1 */
 uint32_t *proc_fd_offset(int fd);       /* &fd->offset, or NULL */
 
+/* ps(2)-style process listing — 32-byte entries shared with userland */
+typedef struct {
+    int32_t id;
+    char    name[24];
+    int32_t state;      /* 0=RUNNING 1=READY 2=DEAD */
+} ps_entry_t;
+
+long sched_ps(void *buf, long len);     /* returns bytes written */
+
 #endif

@@ -15,22 +15,22 @@ CFLAGS     := --target=x86_64-unknown-none \
               -I. -Ikernel -I$(BUILD)
 LDFLAGS    := -T kernel/linker.ld
 
-# User program (ring 3): freestanding, linked low at 0x400000, embedded into
-# the kernel as a C array (build/hello_elf.h) and loaded by kernel/proc/elf.c.
+# User programs (ring 3): freestanding, linked low at 0x400000, embedded into
+# the kernel as C arrays (build/<name>_elf.h) and loaded by kernel/proc/elf.c.
 USER_CFLAGS := --target=x86_64-unknown-none \
               -ffreestanding -fno-stack-protector -fno-stack-check \
               -fno-pic -fno-pie -mno-red-zone \
               -mno-mmx -mno-sse -mno-sse2 \
               -O2 -g -Wall -Wextra -std=c17
-HELLO_ELF   := $(BUILD)/hello.elf
-HELLO_HDR   := $(BUILD)/hello_elf.h
+USER_PROGS  := hello shell
+USER_HDRS   := $(patsubst %,$(BUILD)/%_elf.h,$(USER_PROGS))
 
 KERNEL_SRCS := $(shell find kernel -name '*.c')
 KERNEL_ASMS := $(shell find kernel -name '*.asm')
 KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD)/obj/%.o,$(KERNEL_SRCS)) \
                $(patsubst kernel/%.asm,$(BUILD)/obj-asm/%.o,$(KERNEL_ASMS))
-# generated header must exist before compiling kernel objects that include it
-$(KERNEL_OBJS): | $(HELLO_HDR)
+# generated headers must exist before compiling kernel objects that include them
+$(KERNEL_OBJS): | $(USER_HDRS)
 
 QEMU       := qemu-system-x86_64
 OVMF_CODE  := /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -53,25 +53,26 @@ $(BUILD)/obj-asm/%.o: kernel/%.asm
 	@mkdir -p $(dir $@)
 	nasm -f elf64 -g -F dwarf $< -o $@
 
-$(KERNEL_ELF): $(KERNEL_OBJS) $(HELLO_HDR) kernel/linker.ld
+$(KERNEL_ELF): $(KERNEL_OBJS) $(USER_HDRS) kernel/linker.ld
 	@mkdir -p $(BUILD)
 	ld.lld $(LDFLAGS) -o $@ $(KERNEL_OBJS)
 
-# user/hello.elf + embedded header
+# user programs: user/<name>.c + shared start.asm, linked with user/<name>.ld,
+# then embedded as build/<name>_elf.h
 $(BUILD)/obj-user/start.o: user/start.asm
 	@mkdir -p $(dir $@)
 	nasm -f elf64 -g -F dwarf $< -o $@
 
-$(BUILD)/obj-user/hello.o: user/hello.c
+$(BUILD)/obj-user/%.o: user/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(HELLO_ELF): $(BUILD)/obj-user/start.o $(BUILD)/obj-user/hello.o user/hello.ld
+$(BUILD)/%.elf: $(BUILD)/obj-user/start.o $(BUILD)/obj-user/%.o user/%.ld
 	@mkdir -p $(BUILD)
-	ld.lld -T user/hello.ld -nostdlib -static -o $@ $(BUILD)/obj-user/start.o $(BUILD)/obj-user/hello.o
+	ld.lld -T user/$*.ld -nostdlib -static -o $@ $(BUILD)/obj-user/start.o $(BUILD)/obj-user/$*.o
 
-$(HELLO_HDR): $(HELLO_ELF)
-	python3 tools/elf2h.py $< hello_elf > $@
+$(BUILD)/%_elf.h: $(BUILD)/%.elf
+	python3 tools/elf2h.py $< $*_elf > $@
 
 iso: $(KERNEL_ELF)
 	python3 tools/mkiso.py

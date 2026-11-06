@@ -28,7 +28,8 @@
 #include "proc/thread.h"
 #include "proc/syscall.h"
 #include "proc/elf.h"
-#include "hello_elf.h"   /* generated: embedded user program (build/hello_elf.h) */
+#include "hello_elf.h"   /* generated: embedded user demo (build/hello_elf.h) */
+#include "shell_elf.h"   /* generated: embedded mirsh (build/shell_elf.h) */
 
 #define LIMINE_REQ __attribute__((section(".limine_requests"), used))
 
@@ -85,7 +86,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 4b: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 5a: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -129,7 +130,7 @@ void _start(void)
         fb_init(fb);
         fb_clear(0x0d0d18);
         fb_text(40, 40, 4, 0xffffff, "Hello from MirixOS!");
-        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 4b: VFS + ramdisk + fd syscalls");
+        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 5a: userland shell (mirsh)");
         static const uint32_t bars[] = {
             0xff0000, 0xff8800, 0xffff00, 0x00ff00,
             0x00ffff, 0x0088ff, 0x8800ff, 0xffffff,
@@ -249,34 +250,22 @@ void _start(void)
     ps2_init();
     vfs_init();
 
-    /* Phase 3c: syscalls + per-process address spaces + 2 ring-3 processes. */
+    /* Phase 5a: syscalls + per-process address spaces; 2 demo processes +
+     * the interactive shell (mirsh) reading the keyboard via read(0). */
     syscall_init();
     process_spawn_user("userA", hello_elf, hello_elf_len);
     process_spawn_user("userB", hello_elf, hello_elf_len);
-    uart_printf("main: 2 user processes spawned, idling (scheduler in control)\n");
+    process_spawn_user("shell", shell_elf, shell_elf_len);
+    uart_printf("main: 2 demo processes + mirsh spawned, idling (scheduler in control)\n");
     if (fb_ready()) {
-        fb_puts("\n2 ring-3 processes running (own address spaces)\n");
-        fb_puts("PCI enumerated, PS/2 keyboard live, ramdisk mounted at /\n");
+        fb_puts("\n2 demo processes + mirsh running (own address spaces)\n");
+        fb_puts("ramdisk at / — type in the shell (QEMU sendkey drives it headless)\n");
     }
 
     int alive_n = 0;
     for (;;) {
         msleep(20);
-        /* echo keyboard events */
-        kbd_event_t ev;
-        while (kbd_pop(&ev)) {
-            if (!ev.pressed)
-                continue;
-            if (ev.ascii == '\n')
-                uart_printf("[kbd] ENTER\n");
-            else if (ev.ascii == ' ')
-                uart_printf("[kbd] SPACE\n");
-            else if (ev.ascii)
-                uart_printf("[kbd] '%c'\n", ev.ascii);
-            else
-                uart_printf("[kbd] code=0x%02x%s\n", ev.code,
-                            ev.extended ? " (ext)" : "");
-        }
+        /* keyboard events are consumed by the shell via read(0) */
         if (++alive_n % 25 == 0)   /* every ~500 ms */
             uart_printf("[main] alive: %llu switches, %llu ticks\n",
                         (unsigned long long)sched_switches(),

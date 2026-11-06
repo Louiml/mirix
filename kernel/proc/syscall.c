@@ -120,6 +120,12 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
             return (uint64_t)-9;
         return (uint64_t)vfs_getdents(vn, (void *)buf, (long)len);
     }
+    case SYS_ps: {
+        uint64_t buf = a1, len = a2;
+        if (!is_user_addr(buf) || !is_user_addr(buf + len))
+            return (uint64_t)-2;
+        return (uint64_t)sched_ps((void *)buf, (long)len);
+    }
     case SYS_gettid:
         return (uint64_t)current_thread_id();
     case SYS_yield:

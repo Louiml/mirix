@@ -226,6 +226,21 @@ void sched_yield(void)
     g_force_switch = 0;
 }
 
+long sched_ps(void *buf, long len)
+{
+    long max = len / (long)sizeof(ps_entry_t);
+    long n = 0;
+    ps_entry_t *out = (ps_entry_t *)buf;
+    for (int i = 0; i < g_nthreads && n < max; i++) {
+        out[n].id = g_threads[i].id;
+        memset(out[n].name, 0, sizeof(out[n].name));
+        strncpy(out[n].name, g_threads[i].name, sizeof(out[n].name) - 1);
+        out[n].state = (int32_t)g_threads[i].state;
+        n++;
+    }
+    return n * (long)sizeof(ps_entry_t);
+}
+
 int proc_fd_alloc(int vnode)
 {
     thread_t *t = g_current;
