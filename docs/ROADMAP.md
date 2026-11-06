@@ -175,9 +175,21 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         test-boot + test-crash PASS.
   - [ ] **7d** — C++ widget toolkit + Text Editor / System Settings apps.
 - [ ] **Phase 8: Polish & extras**
-  - [ ] **8a** — e1000 NIC driver (8086:10d3, already enumerated on PCI):
-        MMIO BAR0, RX/TX descriptor rings in contiguous PMM, ARP exchange
-        against QEMU user-net gateway 10.0.2.2 as the boot test.
+  - [x] **8a** — e1000 NIC driver (`kernel/drivers/e1000.c`, 8086:10d3 —
+        q35's *default* NIC on slirp user-net). BAR0 MMIO mapped at
+        `0xffffffffe2000000`, IMC masked, CTRL reset → FD|SLU, MTA cleared;
+        RX ring = 16 descriptors + 16×2 KiB physically-contiguous buffers
+        (RCTL = EN|BAM|SECRC), TX ring = 8 descriptors (TCTL = EN|PSP|CT|
+        COLD), both polled (no IRQ). Boot test sends an ARP who-has
+        10.0.2.2 and receives the slirp gateway reply — serial markers:
+        `e1000: 8086:10d3 at 00:02.0, BAR0 phys 0x81060000, mac=52:54:00:12:34:56`,
+        `e1000: sent ARP request for 10.0.2.2 (60 bytes)`,
+        `e1000: ARP reply from 10.0.2.2 mac=52:55:0a:00:02:02 (64 bytes RX)`.
+        New syscalls `SYS_net_send` (22) / `SYS_net_recv` (23, non-blocking
+        poll). QEMU quirk: on QEMU 11.1 q35, `-nic user,model=e1000` is
+        "not supported by this machine" and silently falls back to e1000e
+        (8086:100e) — no net flags are needed at all. test-boot + test-crash
+        PASS.
   - [ ] **8b** — ACPI S5 poweroff (RSDP via Limine → XSDT → FADT →
         PM1a_CNT SLP_TYP), `cmdline: poweroff` makes QEMU exit cleanly.
   - [ ] **8c** — SMP (`-smp 4`, Limine SMP request, per-AP lidt/TSS/LAPIC,

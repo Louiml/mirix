@@ -236,6 +236,31 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 - `SYS_diskread(lba, nsec, buf)` allocates `ceil(nsec*512/4096)` contiguous
   pages, reads into them via HHDM, memcpy's to the user buffer, frees.
 
+## e1000 NIC (Phase 8a, done)
+
+- `kernel/drivers/e1000.c` drives the Intel 82540EM (8086:10d3) — on QEMU
+  11.1 q35 this is the **default** NIC when no `-nic`/`-netdev` flags are
+  given (slirp user-net; gateway 10.0.2.2 answers ARP). Do NOT pass
+  `-nic user,model=e1000`: on this QEMU that model is "not supported by
+  this machine" and QEMU silently falls back to e1000e (8086:100e).
+- BAR0 (32-bit MMIO) is mapped with `vmm_map` to `0xffffffffe2000000`
+  (128 KiB). Init: IMC=0xffffffff (mask all IRQs — polled driver), CTRL
+  |= RST, wait, CTRL = FD|SLU, clear ICR, read MAC from RAL0/RAH0, zero
+  the 128-entry MTA, then build the rings.
+- DMA structures use `pmm_alloc_pages_contig` (the e1000 wants physically
+  contiguous descriptor rings): RX = 1 page of 16 descriptors + 32 KiB of
+  16×2048-byte packet buffers; TX = 1 page of 8 descriptors + 16 KiB of
+  buffers. RCTL = EN|BAM|SECRC (BSIZE bits 16-17 = 0 → 2048-byte buffers),
+  TCTL = EN|PSP|(CT=0x10 << 4)|(COLD=0x40 << 12).
+- TX: copy frame into the buffer, set length, write the cmd byte at
+  descriptor offset 11 (EOP|IFCS|RS), TDT++, then poll the DD bit in
+  status (bounded, ≤ ~200 ms). RX: poll DD in the head descriptor, copy
+  out, clear status, RDT++.
+- Syscalls `SYS_net_send(buf, len)` / `SYS_net_recv(buf, maxlen)` (22/23),
+  non-blocking. Boot proof: ARP who-has 10.0.2.2 → reply from the slirp
+  gateway (spa at rx[28..31] == 10.0.2.2, sha at rx[22..27]).
+- `lib/io.h` now also has outw/inw/outl/inl (needed by 8b's ACPI).
+
 ## PCI & PS/2 input (Phase 4a, done)
 
 - **PCI:** config space via ECAM/MMCONFIG. The base is NOT assumed: on this
@@ -359,6 +384,9 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | Aurora desktop process | `user/aurora.c` | 7a (done) |
 | Framebuffer TTY (serial mirror) | `kernel/drivers/fb.c`, `lib/uart.c` | 5b (done) |
 | mirsh shell | `user/shell.c` | 5a (done) |
+| e1000 NIC (polled, ARP) | `kernel/drivers/e1000.c` | 8a (done) |
+| ACPI S5 poweroff | `kernel/drivers/acpi.c` | 8b |
+| SMP (Limine MP, spinlocks) | `kernel/arch/x86_64/smp.c` | 8c |
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |
 | virtio-gpu | `kernel/drivers/virtio_gpu.c` | 6 |
 | virtio-net | `kernel/drivers/virtio_net.c` | 8 |
