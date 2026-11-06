@@ -236,6 +236,26 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 - `SYS_diskread(lba, nsec, buf)` allocates `ceil(nsec*512/4096)` contiguous
   pages, reads into them via HHDM, memcpy's to the user buffer, frees.
 
+## ACPI S5 poweroff (Phase 8b, done)
+
+- `kernel/drivers/acpi.c` gets the RSDP physical address from Limine's RSDP
+  request (normalizing HHDM-virtual vs physical), walks RSDP → XSDT (ACPI
+  2.0+) or RSDT → FADT. All tables are read through the HHDM; every table
+  pointer is sanity-checked `< 1 GiB` before dereferencing (a garbage entry
+  would otherwise #PF on an unmapped HHDM page).
+- FADT field offsets: OVMF's rev-3 FADT stores the **legacy 32-bit I/O
+  port** for PM1a_CNT at +64 (0x604 on q35), PM1_CNT_LEN at +89, DSDT phys
+  at +40; the ACPI-2.0 GAS at +80 / X_DSDT at +204 are garbage in that
+  table, so the legacy fields are tried first and the GAS forms are the
+  fallback (for other firmware).
+- `_S5` SLP_TYP is found by scanning the DSDT AML for
+  `08 5F 53 35 5F 12` (`Name(_S5, Package...)`), skipping the PkgLength,
+  then taking the first ByteConst (`0A xx`) or Zero. QEMU: SLP_TYP=0.
+- Poweroff: `outw(PM1a_CNT, (SLP_TYP<<10) | (1<<13))`. On QEMU with
+  `-no-reboot` this exits the process; `tools/test_poweroff.py` boots a
+  `cmdline: poweroff` ISO and asserts the QEMU process exits with code 0
+  and the serial shows `acpi: poweroff`.
+
 ## e1000 NIC (Phase 8a, done)
 
 - `kernel/drivers/e1000.c` drives the Intel 82540EM (8086:10d3) — on QEMU
@@ -385,7 +405,7 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | Framebuffer TTY (serial mirror) | `kernel/drivers/fb.c`, `lib/uart.c` | 5b (done) |
 | mirsh shell | `user/shell.c` | 5a (done) |
 | e1000 NIC (polled, ARP) | `kernel/drivers/e1000.c` | 8a (done) |
-| ACPI S5 poweroff | `kernel/drivers/acpi.c` | 8b |
+| ACPI S5 poweroff | `kernel/drivers/acpi.c` | 8b (done) |
 | SMP (Limine MP, spinlocks) | `kernel/arch/x86_64/smp.c` | 8c |
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |
 | virtio-gpu | `kernel/drivers/virtio_gpu.c` | 6 |

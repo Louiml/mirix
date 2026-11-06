@@ -190,8 +190,18 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         "not supported by this machine" and silently falls back to e1000e
         (8086:100e) — no net flags are needed at all. test-boot + test-crash
         PASS.
-  - [ ] **8b** — ACPI S5 poweroff (RSDP via Limine → XSDT → FADT →
-        PM1a_CNT SLP_TYP), `cmdline: poweroff` makes QEMU exit cleanly.
+  - [x] **8b** — ACPI S5 poweroff (`kernel/drivers/acpi.c`): Limine RSDP
+        request → RSDP → XSDT → FADT (all via HHDM; table pointers
+        sanity-checked `< 1 GiB` so a garbage entry can't fault). PM1a_CNT
+        comes from the legacy u32 port field at FADT+64 (OVMF's rev-3 FADT
+        stores 0x604 there; GAS@+80 as fallback), PM1_CNT_LEN at +89, DSDT
+        at +40, and `_S5`'s SLP_TYP is parsed out of the DSDT AML
+        (`Name(_S5, Package)` → first ByteConst, default 0).
+        `acpi_poweroff()` writes `(SLP_TYP<<10)|SLP_EN` to PM1a_CNT.
+        `cmdline: poweroff` in main.c; new `make test-poweroff` boots a
+        poweroff-cmdline ISO and asserts **QEMU exits on its own (code 0)**
+        plus serial markers `acpi: FADT` / `acpi: poweroff`. All three
+        tests (boot/crash/poweroff) PASS.
   - [ ] **8c** — SMP (`-smp 4`, Limine SMP request, per-AP lidt/TSS/LAPIC,
         spinlocks around scheduler + heap + uart).
 
