@@ -281,6 +281,39 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
   gateway (spa at rx[28..31] == 10.0.2.2, sha at rx[22..27]).
 - `lib/io.h` now also has outw/inw/outl/inl (needed by 8b's ACPI).
 
+## SMP (Phase 8c, done)
+
+- `kernel/arch/x86_64/smp.c`: Limine `mp_request` → `smp_bsp_init` records the
+  BSP (LAPIC id from CPUID leaf 1 EBX[31:24] — the LAPIC MMIO ID register
+  reads 0xffffffff through the HHDM on this QEMU) and kicks the APs.
+  `ap_entry` (per AP): own GDT/IDT/TSS, `syscall_init_cpu()` (STAR/LSTAR/
+  SFMASK/EFER.SCE are per-CPU MSRs!), LAPIC timer start, then waits for
+  `g_idt_ready`/`g_timer_ready`/`g_sched_ready` before idling.
+- Per-CPU state: `g_percpu[cpu]` (current thread, kstack_top, tick counters),
+  both `MSR_GS_BASE` and `MSR_KERNEL_GS_BASE` point at it, so the SYSCALL GS
+  swap is an identity swap and `cur_cpu()` is a single GS-relative read.
+  `g_scratch_arr[]` / `g_kstack_arr[]` are plain arrays indexed by the CPU id.
+- Scheduler (`thread.c`) is now per-CPU: `sched_switch_locked` runs in the
+  local timer IRQ with IF=0, saves the live frame into `cur->saved`, picks
+  the next READY thread, sets `tss_set_rsp0` + `g_kstack_arr[cpu]` +
+  `write_cr3` (only when the address space changes) and overwrites
+  `*frame = next->saved`. A CPU whose current thread is DEAD and nobody is
+  runnable parks in `smp_idle_trampoline` (sti/hlt loop) on a per-CPU idle
+  stack — the frame's rip/rsp/cs/ss are rewritten to the trampoline.
+- Syscall entry (`syscall.asm`) is SMP-safe: it parks **ten** GPRs
+  (rax,rdi,rsi,rdx,r10,r8,r9,r11,rcx,**rbx**) on the *user* stack, gets the
+  CPU id via CPUID (which clobbers EAX/EBX/ECX/EDX — so rbx is restored from
+  the parked frame and urs is recomputed from rsp *after* CPUID), switches to
+  `g_kstack_arr[cpu]`, rebuilds the classic frame there, and `sysret`s from
+  that per-process kernel stack. Mid-syscall parks (yield/exit) are safe
+  because no user context lives in globals.
+- Locking: `lib/spinlock.h` irqsave spinlocks; order sched -> vfs/wm -> heap
+  -> pmm. vfs.c (vnode table + pty rings) and wm.c (window table + z-order)
+  take the lock around mutations; the scheduler lock guards the thread table.
+- Tests: `make test-boot`, `make test-crash`, `make test-poweroff` all use
+  `-smp 4`; boot PASS repeated 3/3 with zero exceptions and the Aurora
+  desktop rendered across CPUs (78 distinct colors in the screen check).
+
 ## PCI & PS/2 input (Phase 4a, done)
 
 - **PCI:** config space via ECAM/MMCONFIG. The base is NOT assumed: on this
@@ -406,7 +439,7 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | mirsh shell | `user/shell.c` | 5a (done) |
 | e1000 NIC (polled, ARP) | `kernel/drivers/e1000.c` | 8a (done) |
 | ACPI S5 poweroff | `kernel/drivers/acpi.c` | 8b (done) |
-| SMP (Limine MP, spinlocks) | `kernel/arch/x86_64/smp.c` | 8c |
+| SMP (Limine MP, spinlocks) | `kernel/arch/x86_64/smp.c` | 8c (done) |
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |
 | virtio-gpu | `kernel/drivers/virtio_gpu.c` | 6 |
 | virtio-net | `kernel/drivers/virtio_net.c` | 8 |

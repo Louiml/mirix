@@ -202,8 +202,30 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         poweroff-cmdline ISO and asserts **QEMU exits on its own (code 0)**
         plus serial markers `acpi: FADT` / `acpi: poweroff`. All three
         tests (boot/crash/poweroff) PASS.
-  - [ ] **8c** — SMP (`-smp 4`, Limine SMP request, per-AP lidt/TSS/LAPIC,
-        spinlocks around scheduler + heap + uart).
+  - [x] **8c** — SMP (`-smp 4`, Limine SMP request, per-AP lidt/TSS/LAPIC,
+         spinlocks around scheduler + heap + uart). `kernel/arch/x86_64/smp.c`
+         brings up 3 APs via Limine's mp response; each AP sets its own
+         GDT/IDT/TSS, starts its LAPIC timer, and runs `syscall_init_cpu()`
+         (STAR/LSTAR/SFMASK/EFER.SCE are **per-CPU** MSRs). Per-CPU state
+         lives in `g_percpu[]` addressed via GS (both GS-base MSRs point at
+         the same percpu slot, so the SYSCALL GS swap is an identity swap).
+         The scheduler is per-CPU round-robin: the timer IRQ (vector 0x30)
+         rewrites the interrupt frame (`*frame = next->saved`), sets
+         TSS.rsp0 + `g_kstack_arr[cpu]`, and switches CR3 when the next
+         thread lives in another address space. `sched_yield()` /
+         `proc_exit_current()` park **mid-syscall** with sti+hlt on the
+         per-process kernel stack, safe because the syscall entry keeps the
+         whole user context on that stack, never in globals. Shared tables
+         (vnode/pty rings in vfs.c, window table in wm.c, scheduler) are
+         protected by irqsave spinlocks (lock order sched -> vfs/wm -> heap
+         -> pmm). The syscall entry (`syscall.asm`) gets the CPU id via
+         CPUID leaf 1 EBX[31:24] (HHDM reads of the LAPIC ID register return
+         0xffffffff on this QEMU) and parks **ten** GPRs on the user stack:
+         CPUID clobbers EAX/EBX/ECX/EDX, so rbx must be parked and urs
+         recomputed from rsp after CPUID. `make test-boot`, `make
+         test-crash`, `make test-poweroff` all run with `-smp 4` and PASS
+         (3/3 repeated boot runs, zero exceptions; the screen check sees 78
+         distinct colors of the Aurora desktop spread across CPUs).
 
 ## Definition of done (v1.0)
 
