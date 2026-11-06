@@ -314,6 +314,27 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
   `-smp 4`; boot PASS repeated 3/3 with zero exceptions and the Aurora
   desktop rendered across CPUs (78 distinct colors in the screen check).
 
+## Testing & installer (Phase 8d, done)
+
+- `tools/test_boot.py` (+ `tools/test_boot.sh` for `make test-boot`): boots
+  the ISO headless (`-smp 4`, OVMF, AHCI image, default e1000), drives the
+  desktop through the QEMU monitor (dock clicks, window drag/close/zoom,
+  Files rows, Editor typing, Settings toggles, `sendkey` into mirsh), greps
+  the serial log for every phase's markers and takes a monitor `screendump`
+  to verify pixels were actually drawn.
+- `tools/test_crash.py` (`make test-crash`): `cmdline: crash` ISO -> expects
+  the #PF panic path (red screendump >= 90%, register dump on serial).
+- `tools/test_poweroff.py` (`make test-poweroff`): `cmdline: poweroff` ISO ->
+  ACPI S5 must make QEMU exit by itself with code 0.
+- `tools/test_stress.py` (`make test-stress`, `STRESS_SECONDS=1800`): the
+  Definition-of-done gate — 30 min of monitor-injected mouse/keyboard input
+  on 4 vCPUs; fails on any `exception:`/`KERNEL PANIC`, requires the
+  `[main] alive` tick counter to advance and a final screendump to render.
+- `tools/burn.sh`: writes `build/mirixos.iso` (hybrid BIOS+UEFI) to a USB
+  stick/disk — the installer/live medium. Safety: refuses mounted/root/
+  too-small devices, requires typing the device name (unless `--yes`),
+  supports `--dry-run`.
+
 ## PCI & PS/2 input (Phase 4a, done)
 
 - **PCI:** config space via ECAM/MMCONFIG. The base is NOT assumed: on this

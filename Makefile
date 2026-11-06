@@ -66,7 +66,7 @@ QEMU_UEFI  := -machine q35 -cpu qemu64 -smp 4 -m 512M -cdrom $(BUILD)/mirixos.is
               -no-reboot
 QEMU_BIOS  := -machine q35 -cpu qemu64 -m 512M -cdrom $(BUILD)/mirixos.iso -no-reboot
 
-.PHONY: all iso run run-bios run-headless debug test-boot test-crash test-poweroff clean
+.PHONY: all iso run run-bios run-headless debug test-boot test-crash test-poweroff test-stress clean
 
 all: $(KERNEL_ELF)
 
@@ -145,6 +145,14 @@ test-crash: $(BUILD)/mirix.img $(KERNEL_ELF)
 test-poweroff: $(BUILD)/mirix.img $(KERNEL_ELF)
 	MIRIXOS_CMDLINE=poweroff MIRIXOS_ISO_NAME=mirixos-poweroff.iso python3 tools/mkiso.py
 	python3 tools/test_poweroff.py
+
+# Definition-of-done stress test: 30 min (STRESS_SECONDS=1800) of headless
+# input hammering on -smp 4; fails on any exception/panic, requires the
+# scheduler tick counter to advance and the desktop to still render.
+# Smoke test: make test-stress STRESS_SECONDS=90
+STRESS_SECONDS ?= 1800
+test-stress: iso $(BUILD)/mirix.img
+	STRESS_SECONDS=$(STRESS_SECONDS) python3 tools/test_stress.py
 
 # GDB: QEMU waits for a debugger on :1234 (gdb -ex 'target remote :1234').
 debug: iso

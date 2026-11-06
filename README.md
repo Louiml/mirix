@@ -60,8 +60,35 @@ xorriso, mtools, QEMU (`qemu-system-x86_64`), OVMF, GDB. On Kali/Debian:
 sudo apt install clang lld nasm make python3 xorriso mtools qemu-system-x86 ovmf gdb
 ```
 
+## Tests
+
+```sh
+make test-boot       # headless boot: serial markers + screendump checks (Phase 7d apps included)
+make test-crash      # panic path: crash-cmdline ISO, expects #PF red panic screen
+make test-poweroff   # ACPI S5: poweroff-cmdline ISO, QEMU must exit on its own
+make test-stress     # Definition-of-done: 30 min input-hammering stress run (-smp 4)
+make test-stress STRESS_SECONDS=90   # quick 90 s smoke run
+```
+
+All tests run QEMU headless with `-smp 4` (SMP), OVMF UEFI, an AHCI disk
+image and the default e1000 NIC on slirp.
+
+## Installing / live USB
+
+`build/mirixos.iso` is a hybrid BIOS+UEFI boot image. To make a bootable USB:
+
+```sh
+make iso
+sudo tools/burn.sh /dev/sdX        # asks for confirmation; --dry-run to preview
+```
+
 ## Status
 
-See [docs/ROADMAP.md](docs/ROADMAP.md). Currently: **Phase 1 done** — boots via
-Limine (UEFI/OVMF + BIOS), prints the memory map on serial, draws "Hello from
-MirixOS!" on the 1280x720 framebuffer. Verified headless by `make test-boot`.
+See [docs/ROADMAP.md](docs/ROADMAP.md). Phases 0-8 done: Limine boot (UEFI +
+BIOS), higher-half kernel, PMM/VMM/heap, preemptive per-CPU SMP scheduler
+(`-smp 4`), syscalls, ring-3 processes with per-process address spaces, VFS +
+ramdisk, AHCI disk, PS/2 input, double-buffered framebuffer + TrueType, a
+kernel window manager/compositor, the ring-3 **Aurora** desktop (dock, drag,
+traffic lights, Terminal via pty, Files, Text Editor + Settings C++ apps),
+e1000 networking, ACPI S5 poweroff, and a 30-minute stress harness
+(`make test-stress`).

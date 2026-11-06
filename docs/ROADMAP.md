@@ -9,7 +9,7 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
       address), framebuffer console (font8x8, public domain) + serial console,
       "Hello from MirixOS!" banner + color bars on screen. `make test-boot`
       PASS: serial banner + QEMU screendump verified (1280x720, text rendered).
-- [ ] **Phase 2: Kernel core**
+- [x] **Phase 2: Kernel core**
   - [x] **2a** — GDT/TSS/IDT (256 gates), all 32 exceptions → red panic screen
         with register dump + CR2 (`make test-crash` PASS: #PF, cr2=0x0,
         97% red screendump), PIC remapped to 0x20+ and masked.
@@ -40,7 +40,7 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         per-process kernel stack (not globals — see DESIGN.md). Two spawned
         user processes interleave `P3.x`/`P4.x` output and exit(43)/exit(44);
         `make test-boot` + `make test-crash` PASS.
-- [ ] **Phase 4: Devices & storage**
+- [x] **Phase 4: Devices & storage**
   - [x] **4a** — PCI enumeration via ECAM/MMCONFIG (on this OVMF+q35 the ECAM
         hole is the 256 MiB reserved memmap entry at **0xE0000000**, not the
         classic 0xB0000000 — reading the memmap beats hardcoding; first 1 MiB
@@ -208,7 +208,7 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
          on the boot vCPU BEFORE releasing the APs (kmain is guaranteed to
          still be on it); APs already do it in `ap_entry()`. Verified:
          10/10 + 5/5 `-smp 4` boots with zero exceptions.
-- [ ] **Phase 8: Polish & extras**
+- [x] **Phase 8: Polish & extras**
   - [x] **8a** — e1000 NIC driver (`kernel/drivers/e1000.c`, 8086:10d3 —
         q35's *default* NIC on slirp user-net). BAR0 MMIO mapped at
         `0xffffffffe2000000`, IMC masked, CTRL reset → FD|SLU, MTA cleared;
@@ -260,6 +260,20 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
          test-crash`, `make test-poweroff` all run with `-smp 4` and PASS
          (3/3 repeated boot runs, zero exceptions; the screen check sees 78
          distinct colors of the Aurora desktop spread across CPUs).
+
+   - [x] **8d** - installer + stress harness. `tools/burn.sh` writes
+         `build/mirixos.iso` (hybrid BIOS+UEFI boot medium) to a USB stick /
+         disk with safety checks (refuses mounted, root or too-small devices,
+         requires typing the device name, `--dry-run` supported) - the ISO is
+         the bootable installer/live USB. `tools/test_stress.py` +
+         `make test-stress` (STRESS_SECONDS=1800 by default, override for a
+         smoke run) boots `-smp 4` headless, waits for the Aurora desktop,
+         then hammers the input path via the QEMU monitor for the full
+         duration (mouse sweeps, dock clicks, keystrokes routed to shell or
+         Editor); it fails fast on any `exception:` / `KERNEL PANIC` /
+         `halting.` and at the end requires zero exceptions, an advancing
+         `[main] alive: ... ticks` counter and a final screendump that still
+         renders. 90 s smoke run: PASS (0 exceptions, ticks 2143 -> 24717).
 
 ## Definition of done (v1.0)
 
