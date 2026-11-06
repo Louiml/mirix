@@ -1,6 +1,7 @@
 #include "uart.h"
 #include "io.h"
 #include "printf.h"
+#include "drivers/fb.h"
 
 #include <stdarg.h>
 
@@ -34,6 +35,10 @@ void uart_putc(char c)
     while ((inb(COM1 + UART_LSR) & LSR_THR_EMPTY) == 0)
         ;
     outb(COM1 + UART_DATA, (uint8_t)c);
+    /* Phase 5b: mirror everything to the scrolling framebuffer console
+     * (fb_putc never calls back into uart, so no recursion). */
+    if (fb_ready() && fb_mirror())
+        fb_putc(c);
 }
 
 void uart_puts(const char *s)

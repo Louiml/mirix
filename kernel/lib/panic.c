@@ -19,6 +19,7 @@ static void msg_sink(void *ctx, char c)
 void kpanic(const char *fmt, ...)
 {
     cli();
+    fb_set_mirror(0);   /* keep the red panic screen clean */
 
     static char msg[512];
     g_msg_p = msg;
@@ -47,6 +48,7 @@ void kpanic(const char *fmt, ...)
 void panic_dump_regs(registers_t *r)
 {
     cli();
+    fb_set_mirror(0);   /* keep the red panic screen clean */
     uart_printf("\n*** KERNEL PANIC: CPU exception ***\n");
     uart_printf("vector=%llu error=0x%llx\n",
                 (unsigned long long)r->vector, (unsigned long long)r->error);

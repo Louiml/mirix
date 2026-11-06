@@ -23,4 +23,14 @@ void fb_putc(char c);
 void fb_puts(const char *s);
 void fb_printf(const char *fmt, ...);
 
+/* Top status strip with 8 color blocks; the text area starts below it and
+ * scrolling preserves it. (Also keeps headless screendumps colorful.) */
+#define FB_HEADER_PX 16
+void fb_draw_header(void);
+
+/* Serial->screen mirror: when on, uart_putc also renders each char to the
+ * scrolling fb console. Panic paths turn it off so the red screen stays clean. */
+void fb_set_mirror(int on);
+int  fb_mirror(void);
+
 #endif

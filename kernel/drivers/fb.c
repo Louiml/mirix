@@ -15,6 +15,7 @@ static int g_ok;
 
 static uint32_t g_cur_x, g_cur_y;
 static uint32_t g_fg = 0xffffff;
+static int g_mirror = 1;   /* uart_putc mirrors to the fb console when set */
 
 /* Scale an 8-bit channel into a mask of `size` bits. */
 static uint32_t scale_channel(uint32_t v8, uint32_t size)
@@ -44,7 +45,7 @@ void fb_init(struct limine_framebuffer *fb)
     g_bsize = fb->blue_mask_size;  g_bshift = fb->blue_mask_shift;
     g_ok = (fb->memory_model == LIMINE_FRAMEBUFFER_RGB && g_bytespp <= 4);
     g_cur_x = 0;
-    g_cur_y = 0;
+    g_cur_y = FB_HEADER_PX;   /* text area starts below the status strip */
 }
 
 int fb_ready(void) { return g_ok; }
@@ -74,7 +75,23 @@ void fb_clear(uint32_t rgb)
         }
     }
     g_cur_x = 0;
-    g_cur_y = 0;
+    g_cur_y = FB_HEADER_PX;
+}
+
+void fb_draw_header(void)
+{
+    if (!g_ok)
+        return;
+    static const uint32_t bars[8] = {
+        0xff0000, 0xff8800, 0xffff00, 0x00ff00,
+        0x00ffff, 0x0088ff, 0x8800ff, 0xffffff,
+    };
+    uint32_t bw = g_w / 8;
+    for (int i = 0; i < 8; i++)
+        for (uint32_t y = 0; y < FB_HEADER_PX; y++)
+            for (uint32_t x = (uint32_t)i * bw;
+                 x < (uint32_t)(i + 1) * bw && x < g_w; x++)
+                fb_putpixel(x, y, bars[i]);
 }
 
 void fb_text(uint32_t x, uint32_t y, uint8_t scale, uint32_t rgb, const char *s)
@@ -97,14 +114,19 @@ void fb_text(uint32_t x, uint32_t y, uint8_t scale, uint32_t rgb, const char *s)
     }
 }
 
+/* Scroll the text area (below the header strip) up by one line. Called only
+ * when the cursor would run past the bottom, so the header is preserved. */
 static void fb_scroll(void)
 {
     uint32_t line = 8 * FB_SCALE;
-    if (g_cur_y + line > g_h)
+    uint32_t top = FB_HEADER_PX;
+    if (g_cur_y + line <= g_h)
         return;
     uint8_t *fb = g_fb->address;
-    memmove(fb, fb + line * g_pitch, (g_h - line) * g_pitch);
-    /* clear the bottom line */
+    memmove(fb + top * g_pitch,
+            fb + (top + line) * g_pitch,
+            (size_t)(g_h - top - line) * g_pitch);
+    /* clear the bottom line of the text area */
     uint32_t bg = pack(0x0d0d18);
     for (uint32_t y = g_h - line; y < g_h; y++) {
         uint8_t *row = fb + y * g_pitch;
@@ -156,3 +178,6 @@ void fb_printf(const char *fmt, ...)
     kvprintf(fb_sink, 0, fmt, ap);
     va_end(ap);
 }
+
+void fb_set_mirror(int on) { g_mirror = on; }
+int  fb_mirror(void)        { return g_mirror; }

@@ -86,7 +86,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 5a: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 5b: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -129,16 +129,9 @@ void _start(void)
                     fb->bpp, (unsigned long long)fb->pitch, fb->address);
         fb_init(fb);
         fb_clear(0x0d0d18);
-        fb_text(40, 40, 4, 0xffffff, "Hello from MirixOS!");
-        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 5a: userland shell (mirsh)");
-        static const uint32_t bars[] = {
-            0xff0000, 0xff8800, 0xffff00, 0x00ff00,
-            0x00ffff, 0x0088ff, 0x8800ff, 0xffffff,
-        };
-        for (int i = 0; i < 8; i++)
-            for (uint32_t y = 200; y < 224; y++)
-                for (uint32_t x = 40 + (uint32_t)i * 60; x < 40 + (uint32_t)i * 60 + 56; x++)
-                    fb_putpixel(x, y, bars[i]);
+        fb_draw_header();
+        /* Phase 5b: from here on every uart line also lands on the scrolling
+         * framebuffer console (mirror enabled in fb_init). */
     } else {
         uart_printf("framebuffer request: NO RESPONSE\n");
     }
@@ -147,11 +140,7 @@ void _start(void)
     gdt_init();
     idt_init();
     pic_init();
-    uart_printf("cpu core: gdt/tss/idt/pic ready\n");
-    if (fb_ready()) {
-        fb_puts("\ncpu core: gdt/tss/idt/pic ready\n");
-        fb_puts("exceptions -> red panic screen\n");
-    }
+    uart_printf("cpu core: gdt/tss/idt/pic ready (exceptions -> red panic screen)\n");
 
     /* Phase 2b: physical memory manager over the Limine memmap */
     if (memmap_request.response == 0)
@@ -194,11 +183,6 @@ void _start(void)
             kpanic("vmm test FAILED: page still mapped after unmap\n");
         uart_printf("vmm: unmap PASS (get_physical now 0)\n");
         pmm_free_page(phys);
-        if (fb_ready()) {
-            fb_puts("\npmm: bitmap over memmap OK\n");
-            fb_puts("heap: self-test PASS\n");
-            fb_puts("vmm: map/unmap roundtrip PASS\n");
-        }
     }
 
     /* Phase 2c: timer — calibrate TSC via PIT, start LAPIC timer, count ticks */
@@ -212,8 +196,6 @@ void _start(void)
         uint64_t elapsed_us = (rdtsc() - tsc0) * 1000000ULL / timer_tsc_hz();
         uart_printf("timer: %llu ticks in %llu us window (expect ~20 at %d Hz)\n",
                     (unsigned long long)dt, (unsigned long long)elapsed_us, TIMER_HZ);
-        if (fb_ready())
-            fb_puts("\ntimer: TSC calibrated, LAPIC timer ticking\n");
     }
 
     /* Phase 3a: threads + round-robin scheduler, preempted by the timer IRQ */
@@ -225,11 +207,12 @@ void _start(void)
             uart_printf("[main] iter %d\n", i);
             msleep(25);
         }
-        uart_printf("sched: %llu switches, %llu ticks total\n",
+        cli();   /* print atomically: a timer preemption mid-line would
+                  * split it and break the serial log checks */
+        uart_printf("sched: %llu switches, %llu ticks total (round-robin, preemptive)\n",
                     (unsigned long long)sched_switches(),
                     (unsigned long long)timer_ticks());
-        if (fb_ready())
-            fb_puts("\nsched: round-robin, preemptive (timer IRQ)\n");
+        sti();
     }
 
     /* Optional deliberate crash for the automated test: cmdline "crash" */
@@ -238,8 +221,6 @@ void _start(void)
     uart_printf("cmdline: '%s'\n", cmdline);
     if (strncmp(cmdline, "crash", 5) == 0) {
         uart_printf("crash-test: dereferencing NULL -> expect #PF panic\n");
-        if (fb_ready())
-            fb_puts("crash-test: dereferencing NULL...\n");
         *(volatile uint64_t *)0 = 0xdeadbeef;   /* -> #PF, vector 14 */
         kpanic("crash-test failed: NULL write did not fault?!\n");
     }
@@ -257,10 +238,6 @@ void _start(void)
     process_spawn_user("userB", hello_elf, hello_elf_len);
     process_spawn_user("shell", shell_elf, shell_elf_len);
     uart_printf("main: 2 demo processes + mirsh spawned, idling (scheduler in control)\n");
-    if (fb_ready()) {
-        fb_puts("\n2 demo processes + mirsh running (own address spaces)\n");
-        fb_puts("ramdisk at / — type in the shell (QEMU sendkey drives it headless)\n");
-    }
 
     int alive_n = 0;
     for (;;) {
