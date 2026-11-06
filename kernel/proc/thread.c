@@ -26,7 +26,16 @@ typedef struct {
     uint8_t *stack_base;     /* NULL for the boot ("main") thread */
     thread_fn_t entry;       /* ring-0 threads only */
     int is_user;
+    struct { int vnode; uint32_t off; } fds[PROC_MAX_FDS];
 } thread_t;
+
+static void fds_init(thread_t *t)
+{
+    for (int i = 0; i < PROC_MAX_FDS; i++) {
+        t->fds[i].vnode = (i < 3) ? 0 : -1;   /* 0/1/2 = console */
+        t->fds[i].off = 0;
+    }
+}
 
 static thread_t g_threads[MAX_THREADS];
 static int g_nthreads;
@@ -74,6 +83,7 @@ static thread_t *alloc_slot(const char *name)
         return 0;
     t->kstack_top = ((uint64_t)t->stack_base + THREAD_STACK_SIZE) & ~15ULL;
     t->pml4_phys = read_cr3() & PTE_ADDR_MASK;   /* shares current space */
+    fds_init(t);
     g_nthreads++;
     return t;
 }
@@ -98,9 +108,9 @@ int thread_create(const char *name, thread_fn_t fn)
     t->saved.rsp = t->kstack_top;
     t->saved.ss = SEL_KDATA;
 
-    sti();
     uart_printf("sched: created thread '%s' (id %d, stack %p)\n",
                 t->name, t->id, (void *)t->kstack_top);
+    sti();
     return t->id;
 }
 
@@ -134,9 +144,9 @@ int process_spawn_user(const char *name, const uint8_t *elf, size_t len)
     t->saved.rflags = 0x202;
     t->saved.rsp = USER_STACK_TOP;
 
-    sti();
     uart_printf("sched: spawned user process '%s' (id %d, entry %p, pml4 %p)\n",
                 t->name, t->id, (void *)entry, (void *)t->pml4_phys);
+    sti();
     return t->id;
 }
 
@@ -153,6 +163,7 @@ void sched_init(void)
     g_current->kstack_top = (uint64_t)&sp & ~15ULL;
     g_current->pml4_phys = read_cr3() & PTE_ADDR_MASK;
     g_current->is_user = 0;
+    fds_init(g_current);
     g_current_kstack_top = g_current->kstack_top;
     tss_set_rsp0(g_current->kstack_top);
     g_switches = 0;
@@ -213,6 +224,46 @@ void sched_yield(void)
     hlt();
     cli();
     g_force_switch = 0;
+}
+
+int proc_fd_alloc(int vnode)
+{
+    thread_t *t = g_current;
+    if (!t)
+        return -1;
+    for (int i = 3; i < PROC_MAX_FDS; i++)
+        if (t->fds[i].vnode < 0) {
+            t->fds[i].vnode = vnode;
+            t->fds[i].off = 0;
+            return i;
+        }
+    return -1;
+}
+
+int proc_fd_close(int fd)
+{
+    thread_t *t = g_current;
+    if (!t || fd < 3 || fd >= PROC_MAX_FDS || t->fds[fd].vnode < 0)
+        return -1;
+    t->fds[fd].vnode = -1;
+    t->fds[fd].off = 0;
+    return 0;
+}
+
+int proc_fd_vnode(int fd)
+{
+    thread_t *t = g_current;
+    if (!t || fd < 0 || fd >= PROC_MAX_FDS)
+        return -1;
+    return t->fds[fd].vnode;
+}
+
+uint32_t *proc_fd_offset(int fd)
+{
+    thread_t *t = g_current;
+    if (!t || fd < 0 || fd >= PROC_MAX_FDS || t->fds[fd].vnode < 0)
+        return 0;
+    return &t->fds[fd].off;
 }
 
 void proc_exit_current(void)

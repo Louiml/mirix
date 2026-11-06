@@ -34,4 +34,11 @@ int current_thread_id(void);
 /* Top of the running process's kernel stack — syscall_entry switches to it. */
 extern uint64_t g_current_kstack_top;
 
+/* Per-process file descriptor table (fds 0/1/2 = console vnode 0). */
+#define PROC_MAX_FDS 16
+int       proc_fd_alloc(int vnode);     /* returns fd or -1 */
+int       proc_fd_close(int fd);
+int       proc_fd_vnode(int fd);        /* vnode index or -1 */
+uint32_t *proc_fd_offset(int fd);       /* &fd->offset, or NULL */
+
 #endif

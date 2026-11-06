@@ -5,10 +5,14 @@
 
 #include <stdint.h>
 
-#define SYS_write  0
-#define SYS_exit   1
-#define SYS_gettid 2
-#define SYS_yield  3
+#define SYS_write    0
+#define SYS_exit     1
+#define SYS_gettid   2
+#define SYS_yield    3
+#define SYS_open     4
+#define SYS_read     5
+#define SYS_close    6
+#define SYS_getdents 7
 
 void syscall_init(void);
 

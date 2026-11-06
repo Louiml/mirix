@@ -175,10 +175,32 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 
 | nr | name | args | notes |
 |---|---|---|---|
-| 0 | `write` | fd, buf, len | fd 1/2 = serial; user pointers validated |
+| 0 | `write` | fd, buf, len | fd 1/2 = serial, else VFS file; user ptrs validated |
 | 1 | `exit` | code | marks process DEAD, parks (never returns) |
 | 2 | `gettid` | — | current process id |
 | 3 | `yield` | — | cooperative reschedule via timer IRQ |
+| 4 | `open` | path, flags | O_CREAT 0x40, O_TRUNC 0x80; `"/"` = root dir; returns fd |
+| 5 | `read` | fd, buf, len | fd 0 = keyboard (non-blocking), else VFS file at fd offset |
+| 6 | `close` | fd | frees the fd slot (file stays in ramdisk) |
+| 7 | `getdents` | fd, buf, len | dir only; fills 40-byte `mirix_dirent_t[]`, returns bytes |
+
+## VFS + ramdisk (Phase 4b, done)
+
+- `kernel/fs/vfs.c`: vnode table `g_vnodes[34]` — 0 console, 1 root dir, 2..33
+  files. Flat namespace (`/hello.txt` → `hello.txt`). File data in a
+  kmalloc'd buffer, `cap` doubles on write (alloc+memcpy+kfree), capped at
+  256 KiB. All VFS calls run in syscall context with IF=0 on one CPU →
+  atomic, no locks.
+- Per-process fd table in `thread_t` (`fds[16]`, 0/1/2 = console vnode 0,
+  each with its own `off` cursor). Accessors `proc_fd_alloc/close/vnode/offset`
+  operate on `g_current` (correct: syscalls run on the caller's kstack).
+- Syscall dispatch copies paths out of user memory via `user_strcpy`
+  (range-checked against the kernel half; dispatch runs under the caller's
+  CR3 so user pages are readable directly).
+- `mirix_dirent_t` is a fixed 40-byte struct shared with userland
+  (`name[32], size u32, type u8, pad[3]`).
+- Userland builds each output line in a buffer and emits it with ONE `write`
+  so timer preemption between syscalls can't interleave half-lines.
 
 ## PCI & PS/2 input (Phase 4a, done)
 
@@ -212,6 +234,7 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | APIC/HPET timer | `kernel/drivers/timer.c` | 2 |
 | PS/2 keyboard/mouse | `kernel/drivers/ps2.c` | 4a (done) |
 | PCI enumeration | `kernel/drivers/pci.c` | 4a (done) |
+| VFS + ramdisk | `kernel/fs/vfs.c` | 4b (done) |
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |
 | virtio-gpu | `kernel/drivers/virtio_gpu.c` | 6 |
 | virtio-net | `kernel/drivers/virtio_net.c` | 8 |

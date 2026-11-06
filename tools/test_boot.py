@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 4a: kernel entered"
+BANNER = "MirixOS phase 4b: kernel entered"
 
 
 def strip_ansi(data: bytes) -> str:
@@ -208,6 +208,13 @@ def main() -> int:
         and "[kbd] SPACE" in serial
         and "[kbd] ENTER" in serial
     )
+    ok_fs = (
+        "vfs: ramdisk ready" in serial
+        and "vfs: created '/hello.txt'" in serial
+        and "fsdemo: wrote 16 bytes" in serial
+        and "fsdemo: read back: mirixfs says hi" in serial
+        and "fsdemo: ls / (1 entries): hello.txt" in serial
+    )
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -222,6 +229,7 @@ def main() -> int:
         and ok_user
         and ok_pci
         and ok_kbd
+        and ok_fs
     )
 
     ok_screen = False

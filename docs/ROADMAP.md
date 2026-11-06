@@ -52,7 +52,19 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         polls kbd_pop). Verified by injecting `sendkey h/i/spc/ret` through
         the QEMU monitor: serial shows `[kbd] 'h'`/`'i'`/`SPACE`/`ENTER`.
         `make test-boot` + `make test-crash` PASS.
-  - [ ] **4b** — VFS + ramdisk (syscalls open/read/write), then AHCI disk.
+  - [x] **4b** — VFS + ramdisk: flat root `/`, 32 file slots, files are
+        kmalloc'd buffers grown by alloc+copy (256 KiB max). Vnodes: 0 =
+        console (write→serial, read→kbd ring), 1 = `/`, 2+ = files. Per-process
+        fd table (16 fds, 0/1/2 = console) in `thread_t`. New syscalls:
+        `open(4) read(5) close(6) getdents(7)`; `write(0)` now routes fd 1/2
+        to serial and other fds to the VFS; user pointers range-checked, paths
+        copied via bounded `user_strcpy`. Kernel spawn/create log lines are
+        printed with IF=0 so timer preemption can't split them. User demo
+        (`user/hello.c`) does create/write/close, read-back, `ls /` — serial
+        shows `fsdemo: wrote 16 bytes...`, `read back: mirixfs says hi`,
+        `ls / (1 entries): hello.txt` from BOTH processes. test-boot +
+        test-crash PASS.
+  - [ ] **4c** — AHCI disk read (PCI 01.06.01), then Phase 5 userland.
 - [ ] **Phase 5: Userland foundation** — minimal libc, `init`, `mirsh`,
       `ls`/`cat`/`echo`/`mkdir`/`ps`, pipes, TTY layer.
 - [ ] **Phase 6: Graphics stack** — framebuffer driver, double buffering,

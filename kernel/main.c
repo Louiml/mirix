@@ -24,6 +24,7 @@
 #include "drivers/timer.h"
 #include "drivers/pci.h"
 #include "drivers/ps2.h"
+#include "fs/vfs.h"
 #include "proc/thread.h"
 #include "proc/syscall.h"
 #include "proc/elf.h"
@@ -84,7 +85,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 4a: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 4b: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -128,7 +129,7 @@ void _start(void)
         fb_init(fb);
         fb_clear(0x0d0d18);
         fb_text(40, 40, 4, 0xffffff, "Hello from MirixOS!");
-        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 4a: PCI + PS/2 keyboard");
+        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 4b: VFS + ramdisk + fd syscalls");
         static const uint32_t bars[] = {
             0xff0000, 0xff8800, 0xffff00, 0x00ff00,
             0x00ffff, 0x0088ff, 0x8800ff, 0xffffff,
@@ -246,6 +247,7 @@ void _start(void)
      * (After the crash-test path, so `cmdline: crash` still panics first.) */
     pci_init();
     ps2_init();
+    vfs_init();
 
     /* Phase 3c: syscalls + per-process address spaces + 2 ring-3 processes. */
     syscall_init();
@@ -254,7 +256,7 @@ void _start(void)
     uart_printf("main: 2 user processes spawned, idling (scheduler in control)\n");
     if (fb_ready()) {
         fb_puts("\n2 ring-3 processes running (own address spaces)\n");
-        fb_puts("PCI enumerated, PS/2 keyboard live (type via QEMU sendkey)\n");
+        fb_puts("PCI enumerated, PS/2 keyboard live, ramdisk mounted at /\n");
     }
 
     int alive_n = 0;
