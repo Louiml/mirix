@@ -4,7 +4,7 @@
 Layout inside the ISO (what Limine expects):
     /boot/limine.conf          bootloader config (Limine scans for it on the boot drive)
     /boot/limine-bios-cd.bin   El Torito boot image (BIOS boot)
-    /boot/limine-uefi-cd.bin   EFI boot image (UEFI boot)
+    /boot/limine-bios.sys      BIOS stage 3 (loaded by the CD boot image from /boot)
     /boot/limine-uefi-cd.bin   EFI boot image (UEFI boot)
     /boot/kernel.elf           the kernel
     /EFI/BOOT/BOOTX64.EFI      UEFI application entry point
@@ -25,7 +25,7 @@ ISO = BUILD / os.environ.get("MIRIXOS_ISO_NAME", "mirixos.iso")
 # Optional kernel cmdline baked into the ISO's limine.conf (for tests).
 CMDLINE = os.environ.get("MIRIXOS_CMDLINE", "")
 
-BOOT_FILES = ["limine.conf", "limine-bios-cd.bin", "limine-uefi-cd.bin"]
+BOOT_FILES = ["limine.conf", "limine-bios-cd.bin", "limine-bios.sys", "limine-uefi-cd.bin"]
 EFI_FILES = ["BOOTX64.EFI", "BOOTIA32.EFI"]
 
 
