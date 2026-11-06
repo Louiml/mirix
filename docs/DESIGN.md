@@ -183,6 +183,8 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | 5 | `read` | fd, buf, len | fd 0 = keyboard (non-blocking), else VFS file at fd offset |
 | 6 | `close` | fd | frees the fd slot (file stays in ramdisk) |
 | 7 | `getdents` | fd, buf, len | dir only; fills 40-byte `mirix_dirent_t[]`, returns bytes |
+| 8 | `ps` | buf, len | fills 32-byte `ps_entry_t[]` (id, name[24], state) |
+| 9 | `diskread` | lba, nsec, buf | AHCI read (≤64 sectors) via contiguous PMM bounce, copied to user |
 
 ## VFS + ramdisk (Phase 4b, done)
 
@@ -218,6 +220,22 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
   `sched:` summary) are printed with IF=0; user output is atomic via
   single-write lines.
 
+## AHCI disk (Phase 4c, done)
+
+- `ahci.c` maps ABAR (BAR5) into kernel space and drives port 0 with polling
+  (IE=0). All DMA structures live in ONE contiguous PMM block
+  (`pmm_alloc_pages_contig(24)` = 96 KiB): CL at +0, FIS RX at +0x400, command
+  tables at +0x1000, data bounce at +0x2000. Port reg struct is exactly 0x80
+  bytes (reserved word at 0x1c included — an early off-by-one-register here
+  made PxSSTS read PxSIG).
+- QEMU quirk: its AHCI uses bit0 of GHC as HR (reset, self-clearing; leaves
+  bit31 set) and bit31 as AE — opposite of the spec. Writing GHC=1 therefore
+  resets and leaves the controller enabled.
+- Reads: H2D FIS (0x27, C=1, cmd 0x25 READ DMA EXT, 48-bit LBA), one PRDT
+  entry (DBC = bytes-1), PxCI=1, poll PxCI clear + !TFES + !(BSY|DRQ).
+- `SYS_diskread(lba, nsec, buf)` allocates `ceil(nsec*512/4096)` contiguous
+  pages, reads into them via HHDM, memcpy's to the user buffer, frees.
+
 ## PCI & PS/2 input (Phase 4a, done)
 
 - **PCI:** config space via ECAM/MMCONFIG. The base is NOT assumed: on this
@@ -251,6 +269,7 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | PS/2 keyboard/mouse | `kernel/drivers/ps2.c` | 4a (done) |
 | PCI enumeration | `kernel/drivers/pci.c` | 4a (done) |
 | VFS + ramdisk | `kernel/fs/vfs.c` | 4b (done) |
+| AHCI SATA disk | `kernel/drivers/ahci.c` | 4c (done) |
 | Framebuffer TTY (serial mirror) | `kernel/drivers/fb.c`, `lib/uart.c` | 5b (done) |
 | mirsh shell | `user/shell.c` | 5a (done) |
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |

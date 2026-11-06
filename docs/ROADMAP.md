@@ -64,7 +64,21 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         shows `fsdemo: wrote 16 bytes...`, `read back: mirixfs says hi`,
         `ls / (1 entries): hello.txt` from BOTH processes. test-boot +
         test-crash PASS.
-  - [ ] **4c** — AHCI disk read (PCI 01.06.01), then Phase 5 userland.
+  - [x] **4c** — AHCI disk read, VERIFIED end-to-end. `kernel/drivers/ahci.c`
+        finds 8086:2922 (class 01.06.01), maps BAR5 (ABAR) at
+        `0xffffffffe1000000`, pulses GHC reset and enables AE — note QEMU's
+        AHCI swaps the spec's GHC bits (bit0=HR reset self-clearing, bit31=AE),
+        so `GHC=1` resets and leaves AE set. Port 0 comes up with one 96 KiB
+        physically-contiguous PMM block holding CL (1 KiB) + FIS (256 B) +
+        command tables (4 KiB) + data bounce (92 KiB); `pmm_alloc_pages_contig`
+        added for this. READ DMA EXT (0x25) is issued on slot 0 and polled.
+        `SYS_diskread(9)` bounce-reads up to 64 sectors into user memory;
+        mirsh has `diskread <lba>`. QEMU attaches `build/mirix.img`
+        (`tools/mkdisk.py`, 64 MiB, magic at LBA 0 and LBA 100) via
+        `-device ide-hd,bus=ide.0`. Boot self-test prints
+        `ahci: LBA 0 read OK (4096 bytes), magic='MIRIXAHCI0...'` and
+        `LBA 100 ... 'MIRIXLBA100...'`; test_boot.py also types `diskread 0`
+        into mirsh via sendkey. test-boot + test-crash PASS.
 - [x] **Phase 5: Userland foundation**
   - [x] **5a** — `mirsh` shell (ring 3): reads lines from fd 0 (keyboard ring),
         echoes, backspace, commands `help ls cat echo write ps exit`; new
