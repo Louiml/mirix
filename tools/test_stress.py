@@ -142,6 +142,15 @@ def main() -> int:
         n_moves = n_clicks = n_keys = 0
         dock_xs = [495, 553, 611, 669, 727, 785]   # 6 dock icon centers, y=670
         letters = ["a", "b", "c", "d", "e", "h", "i", "l", "o", "s", "t"]
+        # QEMU `mouse_move dx dy` is RELATIVE; the virtual pointer starts at
+        # (640,360) — track its absolute position so every target is exact.
+        cx, cy = 640, 360
+
+        def move_to(x, y):
+            nonlocal cx, cy
+            mcmd(f"mouse_move {x - cx} {y - cy}")
+            cx, cy = x, y
+
         i = 0
         while time.time() - start < SECONDS:
             if proc.poll() is not None:
@@ -158,13 +167,14 @@ def main() -> int:
             # sweep the mouse across the screen and the dock
             x = 40 + (i * 37) % 1200
             y = 40 + (i * 53) % 640
-            mcmd(f"mouse_move {x - 640} {y - 360}")
+            move_to(x, y)
             n_moves += 1
             if i % 10 == 0:                       # click a dock icon
                 dx = dock_xs[(i // 10) % len(dock_xs)]
-                mcmd(f"mouse_move {dx - 640} {670 - 360}")
+                move_to(dx, 670)
                 mcmd("mouse_button 1")
                 mcmd("mouse_button 0")
+                move_to(640, 360)
                 n_clicks += 1
             if i % 7 == 0:                        # type into shell/editor
                 mcmd(f"sendkey {letters[i % len(letters)]}")
@@ -206,6 +216,8 @@ def main() -> int:
               f"{n_clicks} clicks, {n_keys} keys")
         print(f"exceptions={exc} panic={panic} alive {first_alive} -> {last_alive} "
               f"screen_bright_cells={bright}")
+        print(f"guest-side evidence: shell_cmds={cur.count('unknown command') + cur.count('ls:')} "
+              f"aurora_markers={len(re.findall(r'aurora: (?!ready|pty link)', cur))}")
         ok = (exc == 0 and not panic and alive_ok and bright > 0)
         print("STRESS TEST:", "PASS" if ok else "FAIL")
         return 0 if ok else 1

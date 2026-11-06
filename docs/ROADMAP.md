@@ -274,9 +274,25 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
          `halting.` and at the end requires zero exceptions, an advancing
          `[main] alive: ... ticks` counter and a final screendump that still
          renders. 90 s smoke run: PASS (0 exceptions, ticks 2143 -> 24717).
+         **30-minute run: PASS** (2026-11-06, `-smp 4`): 0 exceptions, 0 panics,
+         `[main] alive` advanced 889 switches / 2176 ticks -> 285313 switches /
+         506260 ticks, 1214 injected mouse events + 36 shell commands executed,
+         final screendump 1280x720 still rendering (122 bright sample cells).
+         (Harness later improved: `mouse_move` is relative in the QEMU monitor,
+         so the script now tracks the absolute pointer to aim dock clicks;
+         90 s smoke after the fix: PASS, dock hover + shell markers present.)
 
-## Definition of done (v1.0)
+## Definition of done (v1.0) — ALL MET (2026-11-06)
 
-Boots to the graphical desktop in QEMU, runs multiple user-mode GUI apps at
-once, reads/writes its filesystem, takes keyboard+mouse input, and survives a
-30-minute stress run without a kernel panic.
+- [x] Boots to the graphical desktop in QEMU (`make test-boot` PASS: serial
+      markers + screendump pixel checks, `-smp 4`, OVMF UEFI + AHCI disk)
+- [x] Runs multiple user-mode GUI apps at once (Aurora desktop: About, Clock,
+      Files, Terminal/mirsh, Editor, Settings — 7d drive sequence PASS)
+- [x] Reads/writes its filesystem (`/notes.txt` autosave, `/settings.cfg`,
+      `ls`/`cat`/`write`/`diskread` through mirsh + VFS/ramdisk/AHCI)
+- [x] Takes keyboard+mouse input (PS/2 IRQ path -> input ring -> aurora ->
+      pty/Editor; monitor-injected input verified in tests)
+- [x] Survives a 30-minute stress run without a kernel panic
+      (`make test-stress`, STRESS_SECONDS=1800: PASS — 0 exceptions/panics,
+      285k context switches, 506k ticks, desktop still rendering at the end)
+- [x] Installer/live USB path (`tools/burn.sh`, hybrid BIOS+UEFI ISO)
