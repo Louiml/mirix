@@ -130,11 +130,33 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         serial: `ttf: loaded DejaVuSans upm=2048 glyphs=6253`,
         `width at 48px = 424 px`; screendump shows antialiased 48 px
         "MirixOS" glyphs. test-boot + test-crash PASS.
-- [ ] **Phase 7: Aurora desktop** — window server + compositor (alpha,
-      rounded corners, shadows, blur), menu bar, Dock with magnification,
-      WM (drag/resize/min/max, traffic lights), C++ widget toolkit, apps:
-      Terminal, Navigator (file manager), Text Editor, System Settings,
-      Quick Find (launcher).
+- [x] **Phase 7: Aurora desktop**
+  - [x] **7a** — kernel window manager + compositor (`kernel/gui/wm.c`).
+        Windows are kernel objects owning a 4 MiB physically-contiguous
+        32-bpp buffer, mapped into the owning process at
+        `0x40000000 + wid*0x400000` (`vmm_map_in_space()`); the process
+        paints content directly and `SYS_win_commit` marks the compositor
+        dirty. `wm_render()` draws the desktop into the fb back buffer:
+        gradient + aurora bands background (cached), menu bar with
+        TrueType "Aurora" label, per-window rounded frame, drop shadow,
+        traffic lights, centered TTF title, focus ring, content blit with
+        rounded-corner masking. Syscalls 14–21: win_create/commit/move/
+        resize/close/focus/top + uptime. `input_pop_filtered()` lets aurora
+        consume only mouse events so the mirsh shell keeps the keyboard.
+        `user/aurora.c` (ring 3): About/Uptime windows + frameless Dock,
+        title-bar drag, red=close / green=zoom traffic lights, Dock hover
+        magnification + icon click. QEMU quirk: monitor `mouse_move` is
+        relative but its internal absolute cursor is clamped to the screen
+        when computing deltas, so out-of-bounds moves are silently lost —
+        the test drives in-bounds relative moves from the center (640,360).
+        Serial-verified: `aurora: dock hover icon 2 'Notes'`,
+        `aurora: drag win 0 -> (210,186)`, `aurora: closed win 1 (Uptime)`;
+        screendump shows menu bar, windows, dock. test-boot + test-crash
+        PASS.
+  - [ ] **7b** — Terminal app: mirsh running inside a window (PTY-style
+        bridge between window buffer and shell), plus Files (Navigator)
+        over VFS+AHCI and a launcher.
+  - [ ] **7c** — C++ widget toolkit + Text Editor / System Settings apps.
 - [ ] **Phase 8: Polish & extras** — virtio-net + TCP/IP, SMP, power
       management, optional Rust modules, installer ISO, VirtualBox/real
       hardware testing.

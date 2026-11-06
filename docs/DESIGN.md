@@ -291,6 +291,37 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
   embedded as a C array (`build/DejaVuSans_ttf.h`), OFL license in
   `assets/fonts/`.
 
+## Window manager / compositor (Phase 7a, done)
+
+- Windows are kernel objects (`wm_win_t`, 16 max). Each owns
+  `WIN_BUF_PAGES` (1024) physically contiguous pages = one 4 MiB 32-bpp
+  buffer (`pmm_alloc_pages_contig`). `SYS_win_create` maps it into the
+  caller's address space at `WIN_BUF_VA_BASE + wid*0x400000`
+  (`vmm_map_in_space(pml4, va, phys, P|RW|USER)` — walks the target PML4
+  via the HHDM, no CR3 switch).
+- The owner paints its buffer directly (0xRRGGBB pixels, blitted by the
+  compositor with `fb_putpixel`), then `SYS_win_commit(wid)` sets the
+  compositor dirty flag. `wm_render()` (called from the main loop when
+  `wm_dirty() || fb_dirty()`) draws: cached background (vertical gradient
+  + 3 translucent diagonal aurora bands, precomputed once), a menu bar
+  (dark strip + TTF "Aurora"/"MirixOS"), then windows back-to-front in a
+  z-list: two-pass alpha drop shadow (`fill_round` + `fb_blendpixel`),
+  rounded body + title bar, three traffic-light circles (red/yellow/green),
+  centered 13 px TrueType title, the content blit honoring rounded corners,
+  and a blue focus ring on the focused window.
+- Syscalls 14–21: `win_create(x,y,w,h,title,flags)`, `win_commit`,
+  `win_move`, `win_resize`, `win_close`, `win_focus` (raise+focus),
+  `win_top(x,y)` (hit-test, topmost first), `uptime` (ticks*1000/HZ).
+  `WM_FRAMELESS` windows (the Dock) get no title bar.
+- Input split: `input_pop_filtered(out, filter)` — filter 1 = mouse only,
+  2 = keyboard only. Aurora pops mouse-only events (and `SYS_mousepos` for
+  the absolute position, so it does not depend on the ring at all); the
+  shell keeps reading fd 0 (keyboard) via `kbd_pop`.
+- QEMU monitor `mouse_move dx dy` is RELATIVE, but QEMU keeps an internal
+  absolute cursor clamped to the screen when computing the deltas it
+  injects — so a move that would push the cursor off-screen is silently
+  dropped. Tests must use in-bounds relative moves (start at 640,360).
+
 ## Driver list
 
 | Device | Driver | Phase |
@@ -304,6 +335,8 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | AHCI SATA disk | `kernel/drivers/ahci.c` | 4c (done) |
 | Double-buffered fb + cursor | `kernel/drivers/fb.c` | 6a/6b (done) |
 | TrueType renderer | `kernel/lib/ttf.c` | 6c (done) |
+| Window manager / compositor | `kernel/gui/wm.c` | 7a (done) |
+| Aurora desktop process | `user/aurora.c` | 7a (done) |
 | Framebuffer TTY (serial mirror) | `kernel/drivers/fb.c`, `lib/uart.c` | 5b (done) |
 | mirsh shell | `user/shell.c` | 5a (done) |
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |
