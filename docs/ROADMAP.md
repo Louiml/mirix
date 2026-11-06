@@ -40,8 +40,19 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         per-process kernel stack (not globals — see DESIGN.md). Two spawned
         user processes interleave `P3.x`/`P4.x` output and exit(43)/exit(44);
         `make test-boot` + `make test-crash` PASS.
-- [ ] **Phase 4: Devices & storage** — PCI, PS/2 + USB-HID keyboard/mouse,
-      virtio-blk/AHCI, VFS, ramdisk, FAT32 rw, custom MirixFS.
+- [ ] **Phase 4: Devices & storage**
+  - [x] **4a** — PCI enumeration via ECAM/MMCONFIG (on this OVMF+q35 the ECAM
+        hole is the 256 MiB reserved memmap entry at **0xE0000000**, not the
+        classic 0xB0000000 — reading the memmap beats hardcoding; first 1 MiB
+        of bus 0 mapped into kernel space at 0xffffffffe0000000). Found 6
+        devices: host bridge 8086:29c0, VGA 1234:1111, NIC 8086:10d3
+        (class 02), LPC 8086:2918, **AHCI 8086:2922 (class 01.06.01)**, SMBus.
+        PS/2 keyboard on IRQ1 (i8042 init, translation bit → scancode set 1,
+        make/break + shift tracking, 256-entry event ring buffer; consumer
+        polls kbd_pop). Verified by injecting `sendkey h/i/spc/ret` through
+        the QEMU monitor: serial shows `[kbd] 'h'`/`'i'`/`SPACE`/`ENTER`.
+        `make test-boot` + `make test-crash` PASS.
+  - [ ] **4b** — VFS + ramdisk (syscalls open/read/write), then AHCI disk.
 - [ ] **Phase 5: Userland foundation** — minimal libc, `init`, `mirsh`,
       `ls`/`cat`/`echo`/`mkdir`/`ps`, pipes, TTY layer.
 - [ ] **Phase 6: Graphics stack** — framebuffer driver, double buffering,

@@ -6,6 +6,7 @@
 #include "drivers/pic.h"
 #include "drivers/timer.h"
 #include "drivers/lapic.h"
+#include "drivers/ps2.h"
 #include "proc/thread.h"
 
 /* Stub address tables built in isr.asm */
@@ -74,6 +75,11 @@ void irq_handler(registers_t *regs)
     if (v == TIMER_IRQ_VECTOR) {
         timer_irq();          /* ticks++ + LAPIC EOI (drivers/timer.c) */
         sched_tick(regs);     /* may switch threads by rewriting the frame */
+        return;
+    }
+    if (v == IRQ_BASE + 1) {  /* PS/2 keyboard */
+        ps2_keyboard_irq();
+        pic_eoi((uint8_t)v);
         return;
     }
     if (v >= 32 + 16) {

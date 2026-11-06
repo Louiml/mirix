@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 3c: kernel entered"
+BANNER = "MirixOS phase 4a: kernel entered"
 
 
 def strip_ansi(data: bytes) -> str:
@@ -126,11 +126,29 @@ def main() -> int:
             time.sleep(0.1)
         time.sleep(0.5)  # let the kernel finish drawing
 
-        # Screendump via the QEMU monitor (socket in /tmp, image copied back).
+        # QEMU monitor: inject keystrokes into the emulated PS/2 keyboard,
+        # wait for the kernel's [kbd] echo lines, then screendump.
         if MON.exists() and booted:
             s = socket.socket(socket.AF_UNIX)
             s.settimeout(5)
             s.connect(str(MON))
+            for key in ("h", "i", "spc", "ret"):
+                s.sendall(f"sendkey {key}\n".encode())
+                try:
+                    s.recv(4096)
+                except socket.timeout:
+                    pass
+                time.sleep(0.3)
+            kbd_marks = ("[kbd] 'h'", "[kbd] 'i'", "[kbd] SPACE", "[kbd] ENTER")
+            for _ in range(100):
+                try:
+                    if SERIAL.exists():
+                        cur = strip_ansi(SERIAL.read_bytes())
+                        if all(m in cur for m in kbd_marks):
+                            break
+                except OSError:
+                    pass
+                time.sleep(0.1)
             s.sendall(f"screendump {SHOT_TMP}\n".encode())
             try:
                 s.recv(4096)
@@ -176,6 +194,20 @@ def main() -> int:
         and "[user 3] exit(43)" in serial
         and "[user 4] exit(44)" in serial
     )
+    m3 = re.search(r"pci: enumerated (\d+) devices", serial)
+    ok_pci = (
+        m3 is not None
+        and int(m3.group(1)) >= 5
+        and re.search(r"class=01\.", serial) is not None   # AHCI/SATA
+        and re.search(r"class=02\.", serial) is not None   # NIC
+    )
+    ok_kbd = (
+        "ps2: keyboard ready" in serial
+        and "[kbd] 'h'" in serial
+        and "[kbd] 'i'" in serial
+        and "[kbd] SPACE" in serial
+        and "[kbd] ENTER" in serial
+    )
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -188,6 +220,8 @@ def main() -> int:
         and ok_timer
         and ok_sched
         and ok_user
+        and ok_pci
+        and ok_kbd
     )
 
     ok_screen = False

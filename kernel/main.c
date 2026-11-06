@@ -22,6 +22,8 @@
 #include "mm/vmm.h"
 #include "mm/kmalloc.h"
 #include "drivers/timer.h"
+#include "drivers/pci.h"
+#include "drivers/ps2.h"
 #include "proc/thread.h"
 #include "proc/syscall.h"
 #include "proc/elf.h"
@@ -82,7 +84,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 3c: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 4a: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -126,7 +128,7 @@ void _start(void)
         fb_init(fb);
         fb_clear(0x0d0d18);
         fb_text(40, 40, 4, 0xffffff, "Hello from MirixOS!");
-        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 3c: processes + ring 3");
+        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 4a: PCI + PS/2 keyboard");
         static const uint32_t bars[] = {
             0xff0000, 0xff8800, 0xffff00, 0x00ff00,
             0x00ffff, 0x0088ff, 0x8800ff, 0xffffff,
@@ -240,19 +242,42 @@ void _start(void)
         kpanic("crash-test failed: NULL write did not fault?!\n");
     }
 
-    /* Phase 3c: syscalls + per-process address spaces + 2 ring-3 processes.
+    /* Phase 4a: PCI enumeration + PS/2 keyboard input.
      * (After the crash-test path, so `cmdline: crash` still panics first.) */
+    pci_init();
+    ps2_init();
+
+    /* Phase 3c: syscalls + per-process address spaces + 2 ring-3 processes. */
     syscall_init();
     process_spawn_user("userA", hello_elf, hello_elf_len);
     process_spawn_user("userB", hello_elf, hello_elf_len);
     uart_printf("main: 2 user processes spawned, idling (scheduler in control)\n");
-    if (fb_ready())
+    if (fb_ready()) {
         fb_puts("\n2 ring-3 processes running (own address spaces)\n");
+        fb_puts("PCI enumerated, PS/2 keyboard live (type via QEMU sendkey)\n");
+    }
 
+    int alive_n = 0;
     for (;;) {
-        msleep(500);
-        uart_printf("[main] alive: %llu switches, %llu ticks\n",
-                    (unsigned long long)sched_switches(),
-                    (unsigned long long)timer_ticks());
+        msleep(20);
+        /* echo keyboard events */
+        kbd_event_t ev;
+        while (kbd_pop(&ev)) {
+            if (!ev.pressed)
+                continue;
+            if (ev.ascii == '\n')
+                uart_printf("[kbd] ENTER\n");
+            else if (ev.ascii == ' ')
+                uart_printf("[kbd] SPACE\n");
+            else if (ev.ascii)
+                uart_printf("[kbd] '%c'\n", ev.ascii);
+            else
+                uart_printf("[kbd] code=0x%02x%s\n", ev.code,
+                            ev.extended ? " (ext)" : "");
+        }
+        if (++alive_n % 25 == 0)   /* every ~500 ms */
+            uart_printf("[main] alive: %llu switches, %llu ticks\n",
+                        (unsigned long long)sched_switches(),
+                        (unsigned long long)timer_ticks());
     }
 }

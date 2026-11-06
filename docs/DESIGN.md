@@ -180,6 +180,29 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | 2 | `gettid` | — | current process id |
 | 3 | `yield` | — | cooperative reschedule via timer IRQ |
 
+## PCI & PS/2 input (Phase 4a, done)
+
+- **PCI:** config space via ECAM/MMCONFIG. The base is NOT assumed: on this
+  OVMF+q35 boot the memmap's 256 MiB reserved hole at `0xE0000000` is the ECAM
+  (OVMF relocates MMCONFIG; `0xB0000000` reads as zeros). `pci.c` maps the
+  first 1 MiB (bus 0) to `0xffffffffe0000000` with `vmm_map` and scans
+  dev 0-31 x func 0-7 (header-type bit 7 decides multifunction). Devices go
+  into a 64-entry table; `pci_find_by_class(0x01, 0x06)` will find the AHCI
+  controller in 4b.
+- **PS/2 keyboard:** i8042 at 0x60/0x64. Init: disable ports, flush, set
+  config bits (IRQ1 enable 0x01, translation 0x40 so the controller emits
+  **scancode set 1**, kbd clock on), re-enable port, device reset (0xFF →
+  ACK 0xFA → BAT 0xAA), defaults (0xF6), enable scanning (0xF4), then
+  `pic_clear_mask(1)`. All waits are bounded loops (never hang the boot).
+- IRQ1 (vector 0x21) is routed in `idt.c` to `ps2_keyboard_irq()`, which
+  reads 0x60, decodes make/break (`bit7`), 0xE0 extended prefix, tracks
+  shift (0x2A/0x36), maps to ASCII via lower/shift tables, and pushes
+  `kbd_event_t` onto a 256-entry ring buffer. Single producer (IRQ, IF=0) /
+  single consumer (main loop polling `kbd_pop`) — no locking needed.
+- Headless testing trick: QEMU monitor `sendkey h` injects into the emulated
+  PS/2 keyboard even with `-display none`; `tools/test_boot.py` sends
+  `h i spc ret` and greps the serial for the `[kbd]` echo lines.
+
 ## Driver list
 
 | Device | Driver | Phase |
@@ -187,8 +210,8 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | Serial UART 16550 (debug) | `kernel/lib/uart.c` | 0 (done) |
 | Framebuffer console | `kernel/drivers/fb.c` | 1 |
 | APIC/HPET timer | `kernel/drivers/timer.c` | 2 |
-| PS/2 keyboard/mouse | `kernel/drivers/ps2.c` | 4 |
-| PCI enumeration | `kernel/drivers/pci.c` | 4 |
+| PS/2 keyboard/mouse | `kernel/drivers/ps2.c` | 4a (done) |
+| PCI enumeration | `kernel/drivers/pci.c` | 4a (done) |
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |
 | virtio-gpu | `kernel/drivers/virtio_gpu.c` | 6 |
 | virtio-net | `kernel/drivers/virtio_net.c` | 8 |
