@@ -32,7 +32,9 @@ void ps2_keyboard_irq(void);          /* called from idt.c on IRQ1 */
 void ps2_mouse_irq(void);             /* called from idt.c on IRQ12 */
 int  kbd_pop(kbd_event_t *out);       /* 1 if an event was popped */
 int  mouse_pop(mouse_event_t *out);
-int  input_pop(input_event_t *out);   /* kbd first, then mouse; 0 if empty */
+/* Pop one event. filter: 0 = any, 1 = mouse only, 2 = keyboard only.
+ * (Aurora passes 1 so it never steals the shell's keystrokes.) */
+int  input_pop_filtered(input_event_t *out, int filter);
 void mouse_get_pos(int *x, int *y, uint8_t *buttons);
 
 #endif

@@ -81,28 +81,32 @@ void mouse_get_pos(int *x, int *y, uint8_t *buttons)
     *buttons = g_mbtn;
 }
 
-int input_pop(input_event_t *out)
+int input_pop_filtered(input_event_t *out, int filter)
 {
-    kbd_event_t k;
-    if (kbd_pop(&k)) {
-        out->type = 0;
-        out->code = k.code;
-        out->pressed = k.pressed;
-        out->extended = k.extended;
-        out->ascii = k.ascii;
-        out->dx = out->dy = 0;
-        out->buttons = 0;
-        return 1;
+    if (filter != 1) {
+        kbd_event_t k;
+        if (kbd_pop(&k)) {
+            out->type = 0;
+            out->code = k.code;
+            out->pressed = k.pressed;
+            out->extended = k.extended;
+            out->ascii = k.ascii;
+            out->dx = out->dy = 0;
+            out->buttons = 0;
+            return 1;
+        }
     }
-    mouse_event_t m;
-    if (mouse_pop(&m)) {
-        out->type = 1;
-        out->code = out->pressed = out->extended = 0;
-        out->ascii = 0;
-        out->dx = m.dx;
-        out->dy = m.dy;
-        out->buttons = m.buttons;
-        return 1;
+    if (filter != 2) {
+        mouse_event_t m;
+        if (mouse_pop(&m)) {
+            out->type = 1;
+            out->code = out->pressed = out->extended = 0;
+            out->ascii = 0;
+            out->dx = m.dx;
+            out->dy = m.dy;
+            out->buttons = m.buttons;
+            return 1;
+        }
     }
     return 0;
 }

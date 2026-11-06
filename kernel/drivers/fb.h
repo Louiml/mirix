@@ -18,6 +18,12 @@ void fb_putpixel(uint32_t x, uint32_t y, uint32_t rgb);
  * back buffer (src-over). */
 uint32_t fb_getpixel(uint32_t x, uint32_t y);
 void fb_blendpixel(uint32_t x, uint32_t y, uint32_t rgb, uint8_t alpha);
+
+/* Phase 7 (compositor): fast opaque ops onto the back buffer. */
+void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t rgb);
+/* Copy a raw 32-bpp block (src_pitch in bytes) into the back buffer. */
+void fb_copy_rect(uint32_t dx, uint32_t dy, const void *src, uint32_t src_pitch,
+                  uint32_t w, uint32_t h);
 /* Draw a string at pixel (x, y), each glyph scaled `scale` times. */
 void fb_text(uint32_t x, uint32_t y, uint8_t scale, uint32_t rgb, const char *s);
 

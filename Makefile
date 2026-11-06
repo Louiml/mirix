@@ -21,8 +21,9 @@ USER_CFLAGS := --target=x86_64-unknown-none \
               -ffreestanding -fno-stack-protector -fno-stack-check \
               -fno-pic -fno-pie -mno-red-zone \
               -mno-mmx -mno-sse -mno-sse2 \
-              -O2 -g -Wall -Wextra -std=c17
-USER_PROGS  := hello shell
+              -O2 -g -Wall -Wextra -std=c17 \
+              -I. -Iuser
+USER_PROGS  := hello shell aurora
 USER_HDRS   := $(patsubst %,$(BUILD)/%_elf.h,$(USER_PROGS))
 
 # Embedded TrueType font (Phase 6c): assets/fonts/DejaVuSans.ttf -> C array.

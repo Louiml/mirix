@@ -85,6 +85,22 @@ uint64_t vmm_create_space(void)
     return pa;
 }
 
+void vmm_map_in_space(uint64_t pml4_phys, uint64_t virt, uint64_t phys,
+                      uint64_t flags)
+{
+    uint64_t *root = (uint64_t *)phys_to_virt(pml4_phys);
+    uint64_t *pml4e = &root[idx(virt, 4)];
+    uint64_t *pdpt = walk_alloc(pml4e, flags);
+    uint64_t *pde = &pdpt[idx(virt, 3)];
+    uint64_t *pd = walk_alloc(pde, flags);
+    uint64_t *pte = &pd[idx(virt, 2)];
+    uint64_t *pt = walk_alloc(pte, flags);
+    pt[idx(virt, 1)] = (phys & PTE_ADDR_MASK) | flags;
+    /* No invlpg: the target space isn't loaded right now (or, if it is the
+     * current one, the entry was just created so the TLB can't hold a stale
+     * mapping for it — and walk_alloc only adds USER to existing entries). */
+}
+
 uint64_t vmm_get_physical(uint64_t virt)
 {
     uint64_t *pml4e = &pml4()[idx(virt, 4)];

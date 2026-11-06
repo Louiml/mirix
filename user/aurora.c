@@ -1,0 +1,511 @@
+/* aurora — MirixOS desktop shell (ring 3, Phase 7a).
+ *
+ * Creates the desktop windows (About, Uptime, Dock), draws their contents
+ * into the shared window buffers, and runs the input loop: title-bar drag,
+ * traffic-light close/zoom, Dock hover magnification + icon clicks.
+ * All window chrome (menu bar, frames, shadows, titles) is drawn by the
+ * kernel compositor; aurora only paints window CONTENT.
+ */
+#include <stdint.h>
+
+static long syscall3(long nr, long a1, long a2, long a3)
+{
+    long ret;
+    __asm__ volatile ("syscall"
+                      : "=a"(ret)
+                      : "a"(nr), "D"(a1), "S"(a2), "d"(a3)
+                      : "rcx", "r11", "memory");
+    return ret;
+}
+static long syscall6(long nr, long a1, long a2, long a3, long a4, long a5, long a6)
+{
+    long ret;
+    register long r10 __asm__("r10") = a4;
+    register long r8  __asm__("r8")  = a5;
+    register long r9  __asm__("r9")  = a6;
+    __asm__ volatile ("syscall"
+                      : "=a"(ret)
+                      : "a"(nr), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8), "r"(r9)
+                      : "rcx", "r11", "memory");
+    return ret;
+}
+
+#define SYS_write      0
+#define SYS_exit       1
+#define SYS_yield      3
+#define SYS_fbinfo    11
+#define SYS_getevent  12
+#define SYS_mousepos  13
+#define SYS_win_create 14
+#define SYS_win_commit 15
+#define SYS_win_move   16
+#define SYS_win_resize 17
+#define SYS_win_close  18
+#define SYS_win_focus  19
+#define SYS_win_top    20
+#define SYS_uptime     21
+
+#define WIN_BUF_VA_BASE   0x40000000UL
+#define WIN_BUF_VA_STRIDE 0x400000UL
+#define WM_FRAMELESS      1
+#define WM_TITLE_H        28
+
+static long sys_write(long fd, const void *b, long n) { return syscall3(SYS_write, fd, (long)b, n); }
+static long sys_yield(void) { return syscall3(SYS_yield, 0, 0, 0); }
+static long sys_fbinfo(void *b) { return syscall3(SYS_fbinfo, (long)b, 0, 0); }
+/* mouse-only event stream (filter=1) so the shell keeps the keyboard */
+static long sys_getevent(void *b) { return syscall3(SYS_getevent, (long)b, 1, 0); }
+static long sys_mousepos(void *b) { return syscall3(SYS_mousepos, (long)b, 0, 0); }
+static long sys_win_create(int x, int y, int w, int h, const char *t, int fl)
+{ return syscall6(SYS_win_create, x, y, w, h, (long)t, fl); }
+static long sys_win_commit(int wid) { return syscall3(SYS_win_commit, wid, 0, 0); }
+static long sys_win_move(int wid, int x, int y) { return syscall3(SYS_win_move, wid, x, y); }
+static long sys_win_resize(int wid, int w, int h) { return syscall3(SYS_win_resize, wid, w, h); }
+static long sys_win_close(int wid) { return syscall3(SYS_win_close, wid, 0, 0); }
+static long sys_win_focus(int wid) { return syscall3(SYS_win_focus, wid, 0, 0); }
+static long sys_win_top(int x, int y) { return syscall3(SYS_win_top, x, y, 0); }
+static long sys_uptime(void) { return syscall3(SYS_uptime, 0, 0, 0); }
+
+/* input_event_t must match kernel/drivers/ps2.h */
+typedef struct {
+    unsigned char type, code, pressed, extended;
+    char ascii;
+    short dx, dy;
+    unsigned char buttons;
+} input_event_t;
+
+/* ---------------- tiny string/number helpers ---------------- */
+static long slen(const char *s) { long n = 0; while (s[n]) n++; return n; }
+static void puts(const char *s) { sys_write(1, s, slen(s)); }
+static long acpy(char *d, long n, const char *s) { long l = slen(s); for (long i = 0; i < l; i++) d[n + i] = s[i]; return n + l; }
+static long adec(char *d, long n, long v)
+{
+    char t[24]; long m = 0;
+    unsigned long u = v < 0 ? (unsigned long)(-v) : (unsigned long)v;
+    if (v < 0) d[n++] = '-';
+    if (u == 0) t[m++] = '0';
+    while (u) { t[m++] = (char)('0' + (u % 10)); u /= 10; }
+    while (m) d[n++] = t[--m];
+    return n;
+}
+static void log2(const char *a, long v)
+{
+    char b[96]; long n = 0;
+    n = acpy(b, n, a);
+    n = adec(b, n, v);
+    b[n++] = '\n';
+    sys_write(1, b, n);
+}
+
+/* ---------------- 8x8 font (public domain, assets/fonts) -------- */
+#include "assets/fonts/font8x8_basic.h"
+
+/* ---------------- drawing onto a window buffer ---------------- */
+static void wpx(uint32_t *buf, int w, int x, int y, uint32_t c)
+{
+    if (x < 0 || y < 0 || x >= w) return;
+    buf[y * w + x] = c;
+}
+static void wrect(uint32_t *buf, int w, int h, int x, int y, int rw, int rh, uint32_t c)
+{
+    for (int yy = y; yy < y + rh && yy < h; yy++)
+        for (int xx = x; xx < x + rw && xx < w; xx++)
+            if (xx >= 0 && yy >= 0) buf[yy * w + xx] = c;
+}
+static void wcircle(uint32_t *buf, int w, int h, int cx, int cy, int r, uint32_t c)
+{
+    for (int yy = -r; yy <= r; yy++)
+        for (int xx = -r; xx <= r; xx++)
+            if (xx * xx + yy * yy <= r * r) {
+                int px = cx + xx, py = cy + yy;
+                if (px >= 0 && py >= 0 && px < w && py < h)
+                    buf[py * w + px] = c;
+            }
+}
+static void wround(uint32_t *buf, int w, int h, int x, int y, int rw, int rh, int r, uint32_t c)
+{
+    for (int yy = 0; yy < rh; yy++)
+        for (int xx = 0; xx < rw; xx++) {
+            int dx = 0, dy = 0, corner = 0;
+            if (xx < r && yy < r) { dx = r - xx; dy = r - yy; corner = 1; }
+            else if (xx >= rw - r && yy < r) { dx = xx - (rw - r - 1); dy = r - yy; corner = 1; }
+            else if (xx < r && yy >= rh - r) { dx = r - xx; dy = yy - (rh - r - 1); corner = 1; }
+            else if (xx >= rw - r && yy >= rh - r) { dx = xx - (rw - r - 1); dy = yy - (rh - r - 1); corner = 1; }
+            if (corner && dx * dx + dy * dy > r * r) continue;
+            int px = x + xx, py = y + yy;
+            if (px >= 0 && py >= 0 && px < w && py < h) buf[py * w + px] = c;
+        }
+}
+static void wtext(uint32_t *buf, int w, int h, int x, int y, int scale, uint32_t c, const char *s)
+{
+    int cx = x;
+    for (int i = 0; s[i]; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        if (ch >= 128) ch = '?';
+        for (int row = 0; row < 8; row++) {
+            unsigned char bits = font8x8_basic[ch][row];
+            for (int col = 0; col < 8; col++)
+                if (bits & (0x80 >> col))
+                    wrect(buf, w, h, cx + col * scale, y + row * scale, scale, scale, c);
+        }
+        cx += 8 * scale;
+    }
+}
+
+/* ---------------- window bookkeeping ---------------- */
+#define MAXW 8
+typedef struct {
+    int used, wid, x, y, w, h, frameless;
+    const char *title;
+    uint32_t *buf;
+} awin_t;
+static awin_t wins[MAXW];
+static int nwins;
+static int SW, SH;   /* screen size */
+
+static awin_t *find_wid(int wid)
+{
+    for (int i = 0; i < MAXW; i++)
+        if (wins[i].used && wins[i].wid == wid)
+            return &wins[i];
+    return 0;
+}
+
+static awin_t *add_win(int x, int y, int w, int h, const char *title, int fl)
+{
+    for (int i = 0; i < MAXW; i++) {
+        if (wins[i].used) continue;
+        long wid = sys_win_create(x, y, w, h, title, fl);
+        if (wid < 0) return 0;
+        wins[i].used = 1;
+        wins[i].wid = (int)wid;
+        wins[i].x = x; wins[i].y = y; wins[i].w = w; wins[i].h = h;
+        wins[i].frameless = fl;
+        wins[i].title = title;
+        wins[i].buf = (uint32_t *)(WIN_BUF_VA_BASE + (unsigned long)wid * WIN_BUF_VA_STRIDE);
+        nwins++;
+        return &wins[i];
+    }
+    return 0;
+}
+
+static void del_win(int wid)
+{
+    for (int i = 0; i < MAXW; i++)
+        if (wins[i].used && wins[i].wid == wid) {
+            wins[i].used = 0;
+            nwins--;
+            sys_win_close(wid);
+            return;
+        }
+}
+
+/* ---------------- window contents ---------------- */
+
+static void draw_about(awin_t *a)
+{
+    uint32_t *b = a->buf;
+    int w = a->w, h = a->h;
+    wrect(b, w, h, 0, 0, w, h, 0xf7f7fa);
+    /* aurora gradient banner */
+    for (int y = 0; y < 70; y++) {
+        uint32_t t = (uint32_t)(y * 255 / 70);
+        uint32_t r = 60 + t / 3, g = 40 + (t * 2) / 3, bl = 160 + (t / 4);
+        wrect(b, w, h, 0, y, w, 1, (r << 16) | (g << 8) | bl);
+    }
+    wtext(b, w, h, 16, 16, 4, 0xffffff, "MirixOS");
+    wtext(b, w, h, 16, 52, 2, 0xfff0c0, "Aurora desktop");
+    wtext(b, w, h, 16, 96, 1, 0x333344, "64-bit hobby OS — Limine boot, ring-3 userland");
+    wtext(b, w, h, 16, 110, 1, 0x333344, "kernel compositor + TrueType + AHCI + PS/2");
+    wtext(b, w, h, 16, 132, 1, 0x666677, "drag the title bar, click red to close,");
+    wtext(b, w, h, 16, 144, 1, 0x666677, "green to zoom, hover the Dock below");
+    wcircle(b, w, h, w - 40, h - 40, 18, 0x30ffa0);
+    wcircle(b, w, h, w - 40, h - 40, 10, 0xb060ff);
+}
+
+static void draw_uptime(awin_t *a)
+{
+    uint32_t *b = a->buf;
+    int w = a->w, h = a->h;
+    wrect(b, w, h, 0, 0, w, h, 0x1c1c28);
+    long ms = sys_uptime();
+    char line[64];
+    long n = 0;
+    n = acpy(line, n, "uptime: ");
+    n = adec(line, n, ms / 1000);
+    n = acpy(line, n, ".");
+    long frac = (ms / 100) % 10;
+    line[n++] = (char)('0' + frac);
+    line[n++] = 's';
+    line[n] = 0;
+    wtext(b, w, h, 14, 16, 2, 0x66ffcc, "Clock");
+    wtext(b, w, h, 14, 48, 2, 0xffffff, line);
+    wtext(b, w, h, 14, 80, 1, 0x8899aa, "ticks at 100 Hz");
+    /* little progress bar */
+    wrect(b, w, h, 14, h - 30, w - 28, 8, 0x333344);
+    wrect(b, w, h, 14, h - 30, (w - 28) * (int)(ms % 5000) / 5000, 8, 0x40d0ff);
+}
+
+#define DOCK_ICONS 4
+static const char *dock_names[DOCK_ICONS] = { "About", "Clock", "Notes", "Shell" };
+static const uint32_t dock_cols[DOCK_ICONS] = { 0x30ffa0, 0x40d0ff, 0xb060ff, 0xff9f40 };
+
+static void draw_dock(awin_t *d, int mx, int hover_icon)
+{
+    uint32_t *b = d->buf;
+    int w = d->w, h = d->h;
+    /* translucent pill */
+    wround(b, w, h, 0, 0, w, h, 20, 0x20202c);
+    int base = 44, gap = 14;
+    int total = DOCK_ICONS * (base + gap) - gap;
+    int x0 = (w - total) / 2;
+    int ybase = h - 12;
+    for (int i = 0; i < DOCK_ICONS; i++) {
+        int icx = x0 + i * (base + gap) + base / 2;
+        int size = base;
+        int scale_pct = 100;
+        if (mx >= 0 && hover_icon == i) {
+            /* magnification falls off with distance to the icon center */
+            int dx = mx - icx;
+            if (dx < 0) dx = -dx;
+            if (dx < 70) {
+                scale_pct = 100 + (70 - dx) * 60 / 70;   /* up to 160% */
+                size = base * scale_pct / 100;
+            }
+        }
+        int ix = icx - size / 2;
+        int iy = ybase - size;
+        wround(b, w, h, ix, iy, size, size, size / 5, dock_cols[i]);
+        /* letter */
+        char s[2] = { dock_names[i][0], 0 };
+        wtext(b, w, h, ix + size / 2 - 4, iy + size / 2 - 4, 1, 0xffffff, s);
+        (void)scale_pct;
+    }
+}
+
+static void draw_notes(awin_t *a)
+{
+    uint32_t *b = a->buf;
+    int w = a->w, h = a->h;
+    wrect(b, w, h, 0, 0, w, h, 0xfffbe8);
+    wtext(b, w, h, 12, 12, 2, 0x554422, "Notes");
+    wtext(b, w, h, 12, 40, 1, 0x443322, "- boot in QEMU: make run-headless");
+    wtext(b, w, h, 12, 52, 1, 0x443322, "- mirsh: ls / ps diskread 0");
+    wtext(b, w, h, 12, 64, 1, 0x443322, "- windows drag by the title bar");
+    wtext(b, w, h, 12, 84, 1, 0x886655, "Aurora desktop, phase 7a");
+}
+
+/* ---------------- main loop ---------------- */
+
+long main(void)
+{
+    uint32_t fb[3];
+    sys_fbinfo(fb);
+    SW = (int)fb[0];
+    SH = (int)fb[1];
+
+    awin_t *about = add_win(120, 70, 380, 260, "About MirixOS", 0);
+    awin_t *clock = add_win(560, 90, 240, 150, "Uptime", 0);
+    int dw = DOCK_ICONS * (44 + 14) - 14 + 24;
+    int dh = 44 + 26;
+    awin_t *dock = add_win((SW - dw) / 2, SH - dh - 12, dw, dh, "Dock", WM_FRAMELESS);
+    if (!about || !clock || !dock) {
+        puts("aurora: FAILED to create windows\n");
+        syscall3(SYS_exit, 1, 0, 0);
+        return 1;
+    }
+    draw_about(about);
+    draw_uptime(clock);
+    draw_dock(dock, -1, -1);
+    sys_win_commit(about->wid);
+    sys_win_commit(clock->wid);
+    sys_win_commit(dock->wid);
+    sys_win_focus(about->wid);
+
+    {
+        char m[96]; long n = 0;
+        n = acpy(m, n, "aurora: ready: ");
+        n = adec(m, n, nwins);
+        n = acpy(m, n, " windows (About, Uptime, Dock) on ");
+        n = adec(m, n, SW);
+        m[n++] = 'x';
+        n = adec(m, n, SH);
+        n = acpy(m, n, "\n");
+        sys_write(1, m, n);
+    }
+
+    int mx = -1, my = -1, btns = 0, prev_btns = 0;
+    int last_mx = -2, last_my = -2, last_btns = -1;   /* for [mouse] echo */
+    int drag_wid = -1, drag_dx = 0, drag_dy = 0;
+    int hover_icon = -1;
+    int last_uptime_redraw = -1;
+
+    for (;;) {
+        input_event_t ev;
+        while (sys_getevent(&ev)) {
+            if (ev.type == 1) {
+                mx += ev.dx;
+                my += ev.dy;
+                btns = ev.buttons;
+            }
+        }
+        {
+            uint32_t mp[3];
+            sys_mousepos(mp);
+            if (mx < 0) { mx = (int)mp[0]; my = (int)mp[1]; }
+            else { mx = (int)mp[0]; my = (int)mp[1]; }
+            btns = (int)mp[2];
+        }
+
+        /* [mouse] echo on change (same format as the kernel's main loop, so
+         * the headless test sees it even if the main loop loses the race for
+         * the event ring — position here comes from SYS_mousepos, not the
+         * ring, so aurora never starves) */
+        if (mx != last_mx || my != last_my || btns != last_btns) {
+            char m[48]; long n = 0;
+            n = acpy(m, n, "[mouse] x=");
+            n = adec(m, n, mx);
+            n = acpy(m, n, " y=");
+            n = adec(m, n, my);
+            n = acpy(m, n, " b=");
+            int hi = (btns >> 4) & 0xf, lo = btns & 0xf;
+            m[n++] = (char)(hi < 10 ? '0' + hi : 'a' + hi - 10);
+            m[n++] = (char)(lo < 10 ? '0' + lo : 'a' + lo - 10);
+            m[n++] = '\n';
+            sys_write(1, m, n);
+            last_mx = mx; last_my = my; last_btns = btns;
+        }
+
+        /* button down: hit-test traffic lights / title bar / dock */
+        if ((btns & 1) && !(prev_btns & 1)) {
+            int wid = (int)sys_win_top(mx, my);
+            awin_t *hit = wid >= 0 ? find_wid(wid) : 0;
+            if (hit && !hit->frameless) {
+                int lx = mx - hit->x, ly = my - hit->y;
+                if (ly < WM_TITLE_H) {
+                    /* traffic lights? red=close green=zoom */
+                    int d_red = (lx - 14) * (lx - 14) + (ly - WM_TITLE_H / 2) * (ly - WM_TITLE_H / 2);
+                    int d_grn = (lx - 54) * (lx - 54) + (ly - WM_TITLE_H / 2) * (ly - WM_TITLE_H / 2);
+                    if (d_red <= 49) {
+                        char m[64]; long n = 0;
+                        n = acpy(m, n, "aurora: closed win ");
+                        n = adec(m, n, wid);
+                        n = acpy(m, n, " (");
+                        n = acpy(m, n, hit->title);
+                        n = acpy(m, n, ")\n");
+                        sys_write(1, m, n);
+                        sys_win_focus(wid);
+                        del_win(wid);
+                    } else if (d_grn <= 49) {
+                        sys_win_resize(wid, 640, 480);
+                        hit->w = 640; hit->h = 480;
+                        char m[64]; long n = 0;
+                        n = acpy(m, n, "aurora: zoom win ");
+                        n = adec(m, n, wid);
+                        n = acpy(m, n, " to 640x480\n");
+                        sys_write(1, m, n);
+                        if (hit->title[0] == 'U') draw_uptime(hit);
+                        else if (hit->title[0] == 'A') draw_about(hit);
+                        else draw_notes(hit);
+                        sys_win_commit(wid);
+                    } else {
+                        drag_wid = wid;
+                        drag_dx = lx;
+                        drag_dy = ly;
+                        sys_win_focus(wid);
+                    }
+                } else {
+                    sys_win_focus(wid);
+                }
+            } else if (hit && hit->frameless) {
+                /* dock click: which icon? */
+                int base = 44, gap = 14;
+                int total = DOCK_ICONS * (base + gap) - gap;
+                int x0 = hit->x + (hit->w - total) / 2;
+                for (int i = 0; i < DOCK_ICONS; i++) {
+                    int icx = x0 + i * (base + gap) + base / 2;
+                    if (mx >= icx - base && mx <= icx + base && my >= hit->y) {
+                        char m[80]; long n = 0;
+                        n = acpy(m, n, "aurora: dock launch '");
+                        n = acpy(m, n, dock_names[i]);
+                        n = acpy(m, n, "'\n");
+                        sys_write(1, m, n);
+                        if (i == 0 && find_wid(about->wid)) sys_win_focus(about->wid);
+                        else if (i == 1 && find_wid(clock->wid)) sys_win_focus(clock->wid);
+                        else if (i == 2) {
+                            awin_t *nt = add_win(700, 300, 320, 200, "Notes", 0);
+                            if (nt) { draw_notes(nt); sys_win_commit(nt->wid); sys_win_focus(nt->wid); }
+                        } else if (i == 3) {
+                            puts("aurora: shell is on serial (mirix$)\n");
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        /* drag */
+        if (drag_wid >= 0 && (btns & 1)) {
+            awin_t *d = find_wid(drag_wid);
+            if (d) {
+                int nx = mx - drag_dx, ny = my - drag_dy;
+                if (nx != d->x || ny != d->y) {
+                    sys_win_move(drag_wid, nx, ny);
+                    d->x = nx; d->y = ny;
+                }
+            }
+        }
+        if (!(btns & 1) && (prev_btns & 1) && drag_wid >= 0) {
+            awin_t *d = find_wid(drag_wid);
+            char m[80]; long n = 0;
+            n = acpy(m, n, "aurora: drag win ");
+            n = adec(m, n, drag_wid);
+            n = acpy(m, n, " -> (");
+            n = adec(m, n, d ? d->x : 0);
+            m[n++] = ',';
+            n = adec(m, n, d ? d->y : 0);
+            n = acpy(m, n, ")\n");
+            sys_write(1, m, n);
+            drag_wid = -1;
+        }
+        prev_btns = btns;
+
+        /* dock hover magnification */
+        if (dock && find_wid(dock->wid)) {
+            int base = 44, gap = 14;
+            int total = DOCK_ICONS * (base + gap) - gap;
+            int x0 = dock->x + (dock->w - total) / 2;
+            int new_hover = -1;
+            if (my >= dock->y && my <= dock->y + dock->h) {
+                for (int i = 0; i < DOCK_ICONS; i++) {
+                    int icx = x0 + i * (base + gap) + base / 2;
+                    if (mx >= icx - 70 && mx <= icx + 70) { new_hover = i; break; }
+                }
+            }
+            if (new_hover != hover_icon) {
+                hover_icon = new_hover;
+                draw_dock(dock, mx, hover_icon);
+                sys_win_commit(dock->wid);
+                if (hover_icon >= 0) {
+                    char m[64]; long n = 0;
+                    n = acpy(m, n, "aurora: dock hover icon ");
+                    n = adec(m, n, hover_icon);
+                    n = acpy(m, n, " '");
+                    n = acpy(m, n, dock_names[hover_icon]);
+                    n = acpy(m, n, "'\n");
+                    sys_write(1, m, n);
+                }
+            }
+        }
+
+        /* uptime redraw ~2 Hz */
+        long up = sys_uptime() / 500;
+        if (clock && find_wid(clock->wid) && up != last_uptime_redraw) {
+            last_uptime_redraw = up;
+            draw_uptime(clock);
+            sys_win_commit(clock->wid);
+        }
+
+        sys_yield();
+    }
+    return 0;
+}

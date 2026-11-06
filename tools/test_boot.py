@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 6c: kernel entered"
+BANNER = "MirixOS phase 7a: kernel entered"
 
 HD = BUILD / "mirix.img"
 
@@ -165,16 +165,42 @@ def main() -> int:
             # diskread 0 — the shell reads the AHCI disk via SYS_diskread
             send_keys(("d", "i", "s", "k", "r", "e", "a", "d", "spc", "0", "ret"))
             wait_for(("disk: LBA 0 read 4096 bytes, first 32: 'MIRIXAHCI0MirixOS AHCI",))
-            # Phase 6b: inject mouse movement + a click via the monitor
-            for mcmd in ("mouse_move 400 300", "mouse_move 700 400",
-                         "mouse_button 1", "mouse_button 0"):
-                s.sendall((mcmd + "\n").encode())
+            # QEMU `mouse_move dx dy` is RELATIVE, and its internal absolute
+            # cursor is clamped to the screen when computing the deltas — a
+            # huge negative move is "lost", so keep every move in-bounds.
+            # The cursor starts at the screen center (640,360).
+            def mcmd(c, wait=0.35):
+                s.sendall((c + "\n").encode())
                 try:
                     s.recv(4096)
                 except socket.timeout:
                     pass
-                time.sleep(0.3)
+                time.sleep(wait)
+
+            # Phase 6b: inject mouse movement + a click, then return to center
+            mcmd("mouse_move 100 80")           # -> (740,440)
+            mcmd("mouse_move 150 90")           # -> (890,530)
+            mcmd("mouse_button 1")
+            mcmd("mouse_button 0")
+            mcmd("mouse_move -250 -170")        # -> back to (640,360)
             wait_for(("[mouse] x=", "b=01"))
+
+            # Phase 7a: drive the Aurora desktop (all targets in-bounds)
+            wait_for(("aurora: ready: 3 windows",))
+            mcmd("mouse_move 60 310")           # -> (700,670): dock icon 2
+            wait_for(("aurora: dock hover icon 2",))
+            mcmd("mouse_move -200 -300")        # -> (500,370)
+            mcmd("mouse_move -190 -286")        # -> (310,84): About title bar
+            mcmd("mouse_button 1")
+            mcmd("mouse_move 90 116")           # -> (400,200): drag by +90,+116
+            mcmd("mouse_button 0")
+            wait_for(("aurora: drag win",))
+            mcmd("mouse_move 174 -96")          # -> (574,104): Uptime close btn
+            mcmd("mouse_button 1")
+            mcmd("mouse_button 0")
+            wait_for(("aurora: closed win",))
+            mcmd("mouse_move 66 256")           # -> back to (640,360)
+            time.sleep(0.5)
             s.sendall(f"screendump {SHOT_TMP}\n".encode())
             try:
                 s.recv(4096)
@@ -252,6 +278,13 @@ def main() -> int:
         "ttf: loaded DejaVuSans upm=2048 glyphs=" in serial
         and re.search(r"ttf: demo rendered, text width at 48px = [1-9]\d* px", serial) is not None
     )
+    ok_aurora = (
+        "wm: compositor ready" in serial
+        and "aurora: ready: 3 windows" in serial
+        and "aurora: dock hover icon 2" in serial
+        and "aurora: drag win" in serial
+        and "aurora: closed win" in serial
+    )
     ok_ahci = (
         "ahci: port 0 online" in serial
         and "ahci: LBA 0 read OK (4096 bytes), magic='MIRIXAHCI0" in serial
@@ -276,6 +309,7 @@ def main() -> int:
         and ok_ahci
         and ok_fb6
         and ok_ttf
+        and ok_aurora
     )
 
     ok_screen = False

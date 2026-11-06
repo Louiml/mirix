@@ -33,6 +33,8 @@
 #include "shell_elf.h"   /* generated: embedded mirsh (build/shell_elf.h) */
 #include "DejaVuSans_ttf.h"  /* generated: embedded font (build/DejaVuSans_ttf.h) */
 #include "lib/ttf.h"
+#include "gui/wm.h"
+#include "aurora_elf.h"  /* generated: embedded Aurora desktop (build/aurora_elf.h) */
 
 #define LIMINE_REQ __attribute__((section(".limine_requests"), used))
 
@@ -89,7 +91,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 6c: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 7a: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -281,11 +283,20 @@ void _start(void)
     process_spawn_user("userA", hello_elf, hello_elf_len);
     process_spawn_user("userB", hello_elf, hello_elf_len);
     process_spawn_user("shell", shell_elf, shell_elf_len);
-    uart_printf("main: 2 demo processes + mirsh spawned, idling (scheduler in control)\n");
+
+    /* Phase 7a: Aurora desktop. The compositor takes over the screen, so the
+     * serial->fb mirror goes off (serial logging continues). */
+    wm_init();
+    fb_set_mirror(0);
+    process_spawn_user("aurora", aurora_elf, aurora_elf_len);
+    uart_printf("main: demo processes + mirsh + aurora desktop spawned, idling\n");
+    uart_printf("wm: compositor ready, aurora owns the screen\n");
 
     int alive_n = 0;
     for (;;) {
         msleep(20);
+        if (wm_dirty() || fb_dirty())
+            wm_render();       /* composite desktop into the back buffer */
         fb_present();   /* Phase 6a/6b: back -> front + cursor (~50 Hz) */
         /* mouse events: echo position for the headless test (QEMU monitor
          * `mouse_move`/`mouse_button` inject them) */

@@ -55,6 +55,11 @@ int current_thread_id(void)
     return g_current ? g_current->id : -1;
 }
 
+uint64_t current_pml4_phys(void)
+{
+    return g_current ? g_current->pml4_phys : 0;
+}
+
 uint64_t sched_switches(void) { return g_switches; }
 
 /* Entry point for brand-new ring-0 threads: runs on their fresh stack. */

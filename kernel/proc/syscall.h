@@ -19,6 +19,16 @@
 #define SYS_fbinfo   11  /* (w, h, bpp) out via 3 ints in buf */
 #define SYS_getevent 12  /* pop one input_event_t (kbd or mouse) into buf */
 #define SYS_mousepos 13  /* write (x, y, buttons) as 3 ints into buf */
+/* Phase 7: window manager. Window content buffer is mapped into the caller
+ * at WIN_BUF_VA_BASE + wid*WIN_BUF_VA_STRIDE (4 MiB slots, 32-bpp). */
+#define SYS_win_create 14  /* (x, y, w, h, title, flags) -> wid */
+#define SYS_win_commit 15  /* (wid) — redraw compositor */
+#define SYS_win_move   16  /* (wid, x, y) */
+#define SYS_win_resize 17  /* (wid, w, h) */
+#define SYS_win_close  18  /* (wid) */
+#define SYS_win_focus  19  /* (wid) — raise + focus */
+#define SYS_win_top    20  /* (x, y) -> wid of topmost window at point, -1 */
+#define SYS_uptime     21  /* () -> milliseconds since timer start */
 
 void syscall_init(void);
 

@@ -9,8 +9,11 @@
 #include "drivers/ps2.h"
 #include "drivers/ahci.h"
 #include "drivers/fb.h"
+#include "drivers/timer.h"
+#include "gui/wm.h"
 #include "mm/pmm.h"
 #include "mm/mm.h"
+#include "mm/vmm.h"
 
 #define MSR_EFER    0xc0000080
 #define MSR_STAR    0xc0000081
@@ -168,7 +171,7 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
         if (!is_user_addr(buf) || !is_user_addr(buf + sizeof(input_event_t)))
             return (uint64_t)-2;
         input_event_t ev;
-        if (!input_pop(&ev))
+        if (!input_pop_filtered(&ev, (int)a2))
             return 0;                       /* no event pending */
         memcpy((void *)buf, &ev, sizeof(ev));
         return 1;
@@ -186,6 +189,30 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
         out[2] = b;
         return 0;
     }
+    case SYS_win_create: {
+        int x = (int)a1, y = (int)a2, w = (int)a3, h = (int)a4, flags = (int)a6;
+        char title[64];
+        if (user_strcpy(title, a5, sizeof(title)) != 0)
+            return (uint64_t)-2;
+        int wid = wm_create(x, y, w, h, title, flags);
+        if (wid < 0)
+            return (uint64_t)-1;
+        /* map the window's 4 MiB buffer into the caller's address space */
+        uint64_t pml4 = current_pml4_phys();
+        uint64_t va = WIN_BUF_VA_BASE + (uint64_t)wid * WIN_BUF_VA_STRIDE;
+        uint64_t phys = wm_wins()[wid].buf_phys;
+        for (int i = 0; i < WIN_BUF_PAGES; i++)
+            vmm_map_in_space(pml4, va + i * PAGE_SIZE, phys + i * PAGE_SIZE,
+                             PTE_PRESENT | PTE_RW | PTE_USER);
+        return (uint64_t)wid;
+    }
+    case SYS_win_commit: wm_commit((int)a1); return 0;
+    case SYS_win_move:   wm_move((int)a1, (int)a2, (int)a3); return 0;
+    case SYS_win_resize: wm_resize((int)a1, (int)a2, (int)a3); return 0;
+    case SYS_win_close:  wm_close((int)a1); return 0;
+    case SYS_win_focus:  wm_focus((int)a1); return 0;
+    case SYS_win_top:    return (uint64_t)wm_top_at((int)a1, (int)a2);
+    case SYS_uptime:     return (uint64_t)(timer_ticks() * 1000ULL / TIMER_HZ);
     case SYS_gettid:
         return (uint64_t)current_thread_id();
     case SYS_yield:

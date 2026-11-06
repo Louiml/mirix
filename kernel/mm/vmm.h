@@ -23,4 +23,10 @@ void vmm_invlpg(uint64_t virt);
  * Returns the physical address of the new PML4. */
 uint64_t vmm_create_space(void);
 
+/* Map phys into ANOTHER address space (given its PML4 phys) — used to give a
+ * user process a shared window buffer. Walks the tables via the HHDM, so no
+ * CR3 switch is needed. */
+void vmm_map_in_space(uint64_t pml4_phys, uint64_t virt, uint64_t phys,
+                      uint64_t flags);
+
 #endif

@@ -241,6 +241,40 @@ void fb_blendpixel(uint32_t x, uint32_t y, uint32_t rgb, uint8_t alpha)
     fb_putpixel(x, y, (r << 16) | (g << 8) | b);
 }
 
+void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t rgb)
+{
+    if (!g_ok)
+        return;
+    if (x >= g_w) return;
+    if (y >= g_h) return;
+    if (x + w > g_w) w = g_w - x;
+    if (y + h > g_h) h = g_h - y;
+    uint32_t px = pack(rgb);
+    for (uint32_t yy = 0; yy < h; yy++) {
+        uint8_t *row = (uint8_t *)g_draw + (y + yy) * g_pitch + x * g_bytespp;
+        for (uint32_t xx = 0; xx < w; xx++)
+            for (uint32_t i = 0; i < g_bytespp; i++)
+                row[xx * g_bytespp + i] = (uint8_t)(px >> (8 * i));
+    }
+    g_dirty = 1;
+}
+
+void fb_copy_rect(uint32_t dx, uint32_t dy, const void *src, uint32_t src_pitch,
+                  uint32_t w, uint32_t h)
+{
+    if (!g_ok || !src)
+        return;
+    if (dx >= g_w || dy >= g_h)
+        return;
+    if (dx + w > g_w) w = g_w - dx;
+    if (dy + h > g_h) h = g_h - dy;
+    for (uint32_t yy = 0; yy < h; yy++)
+        memcpy((uint8_t *)g_draw + (dy + yy) * g_pitch + dx * g_bytespp,
+               (const uint8_t *)src + yy * src_pitch,
+               (size_t)w * g_bytespp);
+    g_dirty = 1;
+}
+
 /* ---- Phase 6a: double buffering ---- */
 
 void fb_enable_double_buffer(void)
