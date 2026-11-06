@@ -65,8 +65,27 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         `ls / (1 entries): hello.txt` from BOTH processes. test-boot +
         test-crash PASS.
   - [ ] **4c** — AHCI disk read (PCI 01.06.01), then Phase 5 userland.
-- [ ] **Phase 5: Userland foundation** — minimal libc, `init`, `mirsh`,
-      `ls`/`cat`/`echo`/`mkdir`/`ps`, pipes, TTY layer.
+- [x] **Phase 5: Userland foundation**
+  - [x] **5a** — `mirsh` shell (ring 3): reads lines from fd 0 (keyboard ring),
+        echoes, backspace, commands `help ls cat echo write ps exit`; new
+        `SYS_ps(8)` fills 32-byte `ps_entry_t[]` (id/name/state) via
+        `sched_ps()`. Second embedded user ELF via generalized Makefile
+        pattern (`USER_PROGS := hello shell`). `tools/test_boot.py` drives the
+        shell headless through the QEMU monitor `sendkey` (types `ls`, `ps`):
+        serial shows `ls: 1 entries` / `hello.txt (16 bytes)` and the full
+        `ps:` table with `name=shell state=RUNNING`. test-boot + test-crash
+        PASS.
+  - [x] **5b** — framebuffer TTY: `uart_putc` mirrors every char to a
+        scrolling fb console (`fb_putc`), so all kernel + shell output shows
+        on screen. Fixed `fb_scroll` (it never scrolled — cursor clipped at
+        the bottom): now scrolls only the text area below a 16 px status
+        strip (`FB_HEADER_PX`, 8 color bars drawn by `fb_draw_header`).
+        Panic paths call `fb_set_mirror(0)` so the red panic screen stays
+        clean (crash test still 97.4% red). Removed the manual
+        `fb_puts`/`fb_text` blocks in main.c; the `sched:` summary line is
+        printed with IF=0 (a timer preemption used to split it mid-line).
+        Screendump now 94k bright pixels / 9 distinct colors. test-boot +
+        test-crash PASS.
 - [ ] **Phase 6: Graphics stack** — framebuffer driver, double buffering,
       TrueType rendering, input event queue, cursor.
 - [ ] **Phase 7: Aurora desktop** — window server + compositor (alpha,

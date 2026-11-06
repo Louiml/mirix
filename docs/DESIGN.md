@@ -202,6 +202,22 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 - Userland builds each output line in a buffer and emits it with ONE `write`
   so timer preemption between syscalls can't interleave half-lines.
 
+## Framebuffer TTY / serial mirror (Phase 5b, done)
+
+- `uart_putc` ends with `if (fb_ready() && fb_mirror()) fb_putc(c);` — every
+  serial byte also renders on the scrolling fb console (no recursion:
+  `fb_putc` never calls uart). `g_mirror` defaults to 1 in `fb_init`;
+  `kpanic`/`panic_dump_regs` call `fb_set_mirror(0)` first so the red panic
+  screen isn't polluted by further log output.
+- `FB_HEADER_PX` (16 px) top strip with 8 color bars (`fb_draw_header`),
+  drawn once after `fb_clear` in main. `fb_scroll` now scrolls ONLY the text
+  area below the strip (memmove of `fb + header*pitch` region) — the old code
+  `return`ed when the cursor hit the bottom and never scrolled. Cursor home
+  is `(0, FB_HEADER_PX)` in both `fb_init` and `fb_clear`.
+- Kernel log atomicity: lines that tests grep as a unit (spawn/create,
+  `sched:` summary) are printed with IF=0; user output is atomic via
+  single-write lines.
+
 ## PCI & PS/2 input (Phase 4a, done)
 
 - **PCI:** config space via ECAM/MMCONFIG. The base is NOT assumed: on this
@@ -235,6 +251,8 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | PS/2 keyboard/mouse | `kernel/drivers/ps2.c` | 4a (done) |
 | PCI enumeration | `kernel/drivers/pci.c` | 4a (done) |
 | VFS + ramdisk | `kernel/fs/vfs.c` | 4b (done) |
+| Framebuffer TTY (serial mirror) | `kernel/drivers/fb.c`, `lib/uart.c` | 5b (done) |
+| mirsh shell | `user/shell.c` | 5a (done) |
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |
 | virtio-gpu | `kernel/drivers/virtio_gpu.c` | 6 |
 | virtio-net | `kernel/drivers/virtio_net.c` | 8 |
