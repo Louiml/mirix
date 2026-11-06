@@ -1,4 +1,5 @@
-/* MirixOS first user program (ring 3). Freestanding — no libc yet. */
+/* MirixOS user process (ring 3). Freestanding — no libc yet.
+ * Prints P<tid>.<i> lines and yields, so multiple processes interleave. */
 
 static long syscall3(long nr, long a1, long a2, long a3)
 {
@@ -13,47 +14,25 @@ static long syscall3(long nr, long a1, long a2, long a3)
 #define SYS_write  0
 #define SYS_exit   1
 #define SYS_gettid 2
+#define SYS_yield  3
 
 static long sys_write(long fd, const void *buf, long len)
 {
     return syscall3(SYS_write, fd, (long)buf, len);
 }
 
-static long sys_gettid(void)
-{
-    return syscall3(SYS_gettid, 0, 0, 0);
-}
-
-static void puts(const char *s)
-{
-    long n = 0;
-    while (s[n])
-        n++;
-    sys_write(1, s, n);
-}
-
 long main(void)
 {
-    puts("hello from ring 3!\n");
-    long r = sys_write(1, "user: write returned 19? checking...\n", 36);
-    /* report the write() return value as a single hex-ish line */
-    char buf[64];
-    buf[0] = 'r'; buf[1] = 'e'; buf[2] = 't'; buf[3] = '=';
-    long v = r;
-    for (int i = 0; i < 8; i++) {
-        int d = (int)(v & 0xf);
-        buf[4 + (7 - i)] = d < 10 ? '0' + d : 'a' + d - 10;
-        v >>= 4;
+    long tid = syscall3(SYS_gettid, 0, 0, 0);
+    char line[8];
+    for (int i = 0; i < 5; i++) {
+        line[0] = 'P';
+        line[1] = (char)('0' + (tid & 0xf));
+        line[2] = '.';
+        line[3] = (char)('0' + i);
+        line[4] = '\n';
+        sys_write(1, line, 5);
+        syscall3(SYS_yield, 0, 0, 0);
     }
-    buf[12] = '\n';
-    sys_write(1, buf, 13);
-
-    long tid = sys_gettid();
-    char t[16];
-    t[0] = 't'; t[1] = 'i'; t[2] = 'd'; t[3] = '=';
-    t[4] = (char)('0' + (tid & 0xf));
-    t[5] = '\n';
-    sys_write(1, t, 6);
-
-    return 42;   /* -> SYS_exit(42) from start.asm */
+    return 40 + (tid & 0xf);   /* exit code 41/42... -> SYS_exit via _start */
 }

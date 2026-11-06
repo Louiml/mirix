@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 3b: kernel entered"
+BANNER = "MirixOS phase 3c: kernel entered"
 
 
 def strip_ansi(data: bytes) -> str:
@@ -111,12 +111,14 @@ def main() -> int:
             if proc.poll() is not None:
                 break
             time.sleep(0.1)
-        # Wait until the kernel reaches its final "halting." line (max 30s),
-        # so the timer/tick output is captured before the screendump.
+        # Wait until both user processes have exited (or a panic/halt, max 30s)
+        # so their output is captured before the screendump.
         for _ in range(300):
             try:
-                if SERIAL.exists() and "halting." in strip_ansi(SERIAL.read_bytes()):
-                    break
+                if SERIAL.exists():
+                    s = strip_ansi(SERIAL.read_bytes())
+                    if s.count("[user ") >= 2 and "exit(" in s or "halting." in s:
+                        break
             except OSError:
                 pass
             if proc.poll() is not None:
@@ -168,10 +170,11 @@ def main() -> int:
     ok_user = (
         "syscall: STAR=" in serial
         and "elf: loaded" in serial
-        and "entering ring 3" in serial
-        and "hello from ring 3!" in serial
-        and "tid=" in serial
-        and "[user] exit(42)" in serial
+        and serial.count("spawned user process") >= 2   # banner may interleave with user output
+        and "P3." in serial
+        and "P4." in serial
+        and "[user 3] exit(43)" in serial
+        and "[user 4] exit(44)" in serial
     )
     ok_serial = (
         BANNER in serial

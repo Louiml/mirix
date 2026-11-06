@@ -22,6 +22,11 @@ static inline uint64_t read_cr3(void)
     return v;
 }
 
+static inline void write_cr3(uint64_t v)
+{
+    __asm__ volatile ("mov %0, %%cr3" : : "r"(v) : "memory");
+}
+
 static inline uint64_t rdtsc(void)
 {
     uint32_t lo, hi;

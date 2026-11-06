@@ -18,4 +18,9 @@ void vmm_unmap(uint64_t virt);
 uint64_t vmm_get_physical(uint64_t virt);   /* 0 if unmapped */
 void vmm_invlpg(uint64_t virt);
 
+/* Create a new address space: fresh PML4 with the kernel half (entries
+ * 256-511: HHDM, kernel image, heap) copied from the current one.
+ * Returns the physical address of the new PML4. */
+uint64_t vmm_create_space(void);
+
 #endif

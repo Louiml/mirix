@@ -8,6 +8,7 @@
 #define SYS_write  0
 #define SYS_exit   1
 #define SYS_gettid 2
+#define SYS_yield  3
 
 void syscall_init(void);
 
@@ -18,6 +19,5 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
 
 /* asm helpers */
 void enter_usermode(uint64_t entry, uint64_t user_sp) __attribute__((noreturn));
-extern uint64_t ring0_stack_top;   /* data symbol: top of the ring-0 IRQ stack */
 
 #endif

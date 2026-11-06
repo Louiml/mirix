@@ -139,10 +139,46 @@ page across different permissions.
   0x400000 (`user/hello.ld`), embedded via `tools/elf2h.py` ->
   `build/hello_elf.h`.
 
+## Processes & address spaces (Phase 3c, done)
+
+- `thread_t` now carries `pml4_phys`, `kstack_top`, `is_user`. Kernel threads
+  run ring 0; user processes get a fabricated ring-3 frame (cs=0x23, ss=0x1B,
+  rsp=USER_STACK_TOP) resumed through the same iretq path as kernel threads.
+- `vmm_create_space()` allocates a fresh PML4 and copies entries 256-511
+  (kernel half: HHDM, kernel image, heap) from the current one; the user half
+  is private. `process_spawn_user()` creates the space, switches CR3 to it,
+  runs the ELF loader, switches back.
+- The timer-IRQ frame-rewrite switch now also swaps `write_cr3(next->pml4)`,
+  `tss_set_rsp0(next->kstack_top)` and `g_current_kstack_top` inside the same
+  IF=0 critical section, so a ring-3 process preempted by the timer resumes
+  under its own CR3 with its own kernel stack. Preemption in ring 3 is on.
+- `syscall_entry` switches to `g_current_kstack_top` (per-process). The user
+  rip/rflags/rsp are saved **on that kernel stack**, not in globals:
+  `sched_yield()`/`proc_exit_current()` do `sti; hlt` mid-syscall, so another
+  process can enter a syscall while this one is parked — with globals the parked
+  process would `sysret` to the other process's rip under its own CR3 (observed
+  as #GP at the ring-3 `hlt` right after `exit`). `g_scratch` is only touched
+  with IF=0, before the stack swap, so it is race-free.
+- `SYS_yield` (3) = cooperative reschedule: force_switch + sti/hlt, the timer
+  IRQ switches away and the saved frame resumes right after the hlt.
+  `SYS_exit` prints `[user <tid>] exit(<code>)`, marks the process DEAD and
+  parks in a hlt loop; the scheduler only reselects TH_READY, so DEAD
+  processes are never resumed (reaping = never reselecting; no free yet).
+- Verified: two spawned processes (same embedded ELF, separate PML4s)
+  interleave `P3.0..P3.4` / `P4.0..P4.4` on serial, then `[user 3] exit(43)`,
+  `[user 4] exit(44)`; main keeps idling with the switch counter climbing.
+
 ## Syscall table
 
-TBD — Phase 3. Interface via `syscall`/`sysret`, number in `rax`, args in
-`rdi, rsi, rdx, r10, r8, r9`.
+Interface via `syscall`/`sysret`, number in `rax`, args in
+`rdi, rsi, rdx, r10, r8, r9`, return in `rax`:
+
+| nr | name | args | notes |
+|---|---|---|---|
+| 0 | `write` | fd, buf, len | fd 1/2 = serial; user pointers validated |
+| 1 | `exit` | code | marks process DEAD, parks (never returns) |
+| 2 | `gettid` | — | current process id |
+| 3 | `yield` | — | cooperative reschedule via timer IRQ |
 
 ## Driver list
 

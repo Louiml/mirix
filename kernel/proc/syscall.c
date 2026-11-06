@@ -26,13 +26,10 @@ void syscall_init(void)
     wrmsr(MSR_STAR, ((uint64_t)SEL_KCODE << 32) | ((uint64_t)0x10 << 48));
     wrmsr(MSR_LSTAR, (uint64_t)syscall_entry);
     wrmsr(MSR_SFMASK, 0x200);   /* clear IF on syscall entry */
+    /* TSS rsp0 is set per-process by the scheduler (sched_switch_from_irq). */
 
-    /* Ring 3 -> ring 0 interrupts/exceptions land on rsp0. */
-    tss_set_rsp0(ring0_stack_top);
-
-    uart_printf("syscall: STAR=%llx LSTAR=%p SFMASK=0x200, rsp0=%p\n",
-                (unsigned long long)rdmsr(MSR_STAR), (void *)(uint64_t)syscall_entry,
-                (void *)ring0_stack_top);
+    uart_printf("syscall: STAR=%llx LSTAR=%p SFMASK=0x200\n",
+                (unsigned long long)rdmsr(MSR_STAR), (void *)(uint64_t)syscall_entry);
 }
 
 uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -54,12 +51,16 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
     }
     case SYS_gettid:
         return (uint64_t)current_thread_id();
+    case SYS_yield:
+        sched_yield();
+        return 0;
     case SYS_exit: {
-        uart_printf("[user] exit(%llu) — halting\n", (unsigned long long)a1);
-        uart_printf("halting.\n");
-        cli();
-        for (;;)
-            hlt();
+        /* Park the process: mark DEAD, then wait for the timer IRQ to
+         * switch away (the scheduler never reselects DEAD processes). */
+        uart_printf("[user %d] exit(%llu)\n", current_thread_id(),
+                    (unsigned long long)a1);
+        proc_exit_current();
+        return 0;   /* not reached */
     }
     default:
         uart_printf("syscall: unknown nr %llu from rip=%p\n",

@@ -82,7 +82,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 3b: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 3c: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -126,7 +126,7 @@ void _start(void)
         fb_init(fb);
         fb_clear(0x0d0d18);
         fb_text(40, 40, 4, 0xffffff, "Hello from MirixOS!");
-        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 3b: syscalls + ring 3");
+        fb_text(40, 40 + 8 * 4 + 16, 2, 0x8899aa, "Phase 3c: processes + ring 3");
         static const uint32_t bars[] = {
             0xff0000, 0xff8800, 0xffff00, 0x00ff00,
             0x00ffff, 0x0088ff, 0x8800ff, 0xffffff,
@@ -240,22 +240,19 @@ void _start(void)
         kpanic("crash-test failed: NULL write did not fault?!\n");
     }
 
-    /* Phase 3b: syscall/sysret + ELF loader + first ring-3 program.
+    /* Phase 3c: syscalls + per-process address spaces + 2 ring-3 processes.
      * (After the crash-test path, so `cmdline: crash` still panics first.) */
     syscall_init();
-    {
-        uint64_t entry = elf_load(hello_elf, hello_elf_len);
-        if (entry == 0)
-            kpanic("elf_load of embedded hello.elf failed\n");
-        sched_set_user_mode(1);   /* no preemption while in ring 3 (Phase 3c) */
-        uart_printf("entering ring 3: entry=%p user_sp=%p\n",
-                    (void *)entry, (void *)USER_STACK_TOP);
-        if (fb_ready())
-            fb_puts("\nring 3 user program running (syscalls enabled)\n");
-        enter_usermode(entry, USER_STACK_TOP);   /* does not return */
-    }
+    process_spawn_user("userA", hello_elf, hello_elf_len);
+    process_spawn_user("userB", hello_elf, hello_elf_len);
+    uart_printf("main: 2 user processes spawned, idling (scheduler in control)\n");
+    if (fb_ready())
+        fb_puts("\n2 ring-3 processes running (own address spaces)\n");
 
-    uart_printf("halting.\n");
-    for (;;)
-        hlt();
+    for (;;) {
+        msleep(500);
+        uart_printf("[main] alive: %llu switches, %llu ticks\n",
+                    (unsigned long long)sched_switches(),
+                    (unsigned long long)timer_ticks());
+    }
 }

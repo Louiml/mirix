@@ -72,6 +72,19 @@ void vmm_unmap(uint64_t virt)
     vmm_invlpg(virt);
 }
 
+uint64_t vmm_create_space(void)
+{
+    uint64_t pa = pmm_alloc_page();
+    if (pa == 0)
+        kpanic("vmm: OOM creating address space\n");
+    uint64_t *dst = (uint64_t *)phys_to_virt(pa);
+    uint64_t *src = pml4();
+    memset(dst, 0, PAGE_SIZE);
+    for (int i = 256; i < 512; i++)   /* kernel half shared */
+        dst[i] = src[i];
+    return pa;
+}
+
 uint64_t vmm_get_physical(uint64_t virt)
 {
     uint64_t *pml4e = &pml4()[idx(virt, 4)];

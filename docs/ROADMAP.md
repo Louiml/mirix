@@ -21,7 +21,7 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         LAPIC bus calibrated via one-shot vs TSC (QEMU TCG ~929 MHz), periodic
         LVT timer on vector 0x30 at 100 Hz. Boot prints `timer: 20 ticks in
         200087 us window` (exactly 100 Hz). `make test-boot` PASS.
-- [ ] **Phase 3: Processes & syscalls**
+- [x] **Phase 3: Processes & syscalls**
   - [x] **3a** — kernel threads + round-robin scheduler, preempted by the
         100 Hz timer IRQ (frame-rewrite switch in the IRQ handler).
         `make test-boot` PASS: interleaved `[alpha]`/`[beta]`/`[main]`
@@ -31,7 +31,15 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         0x400000 with PTE_USER (embedded hello.elf), syscalls write/exit/
         gettid. `make test-boot` PASS: `hello from ring 3!`, `ret=00000024`,
         `tid=0`, `[user] exit(42)`.
-  - [ ] **3c** — process struct (address space per process), `fork`/`exec`/`exit`/`wait`.
+  - [x] **3c** — processes with per-process address spaces: `process_spawn_user`
+        gives each process its own PML4 (kernel half copied from boot PML4),
+        kernel stack (TSS rsp0 + syscall-entry stack, swapped atomically with
+        CR3 in the timer-IRQ frame-rewrite switch), fabricated ring-3 resume
+        frame; preemption in ring 3 enabled; new `SYS_yield`; `SYS_exit` parks
+        the process DEAD instead of halting. Syscall user context kept on the
+        per-process kernel stack (not globals — see DESIGN.md). Two spawned
+        user processes interleave `P3.x`/`P4.x` output and exit(43)/exit(44);
+        `make test-boot` + `make test-crash` PASS.
 - [ ] **Phase 4: Devices & storage** — PCI, PS/2 + USB-HID keyboard/mouse,
       virtio-blk/AHCI, VFS, ramdisk, FAT32 rw, custom MirixFS.
 - [ ] **Phase 5: Userland foundation** — minimal libc, `init`, `mirsh`,

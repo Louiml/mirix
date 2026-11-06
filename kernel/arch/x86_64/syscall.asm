@@ -9,45 +9,38 @@
 ; stacks before calling C.
 
 extern syscall_dispatch
+extern g_current_kstack_top   ; proc/thread.c: running process's kernel stack top
 
 section .bss
-align 16
-g_syscall_stack:   resb 16384
-align 16
-g_syscall_stack_top:
-align 16
-g_ring0_stack:     resb 16384        ; TSS rsp0: stack for ring3->ring0 IRQs/exceptions
-align 16
-g_ring0_stack_top:
-
-g_user_rsp:     resq 1
-g_user_rip:     resq 1
-g_user_rflags:  resq 1
+g_scratch:      resq 1         ; only touched with IF=0 (see below)
 
 section .text
 
 global syscall_entry
 global enter_usermode
-global ring0_stack_top
-
-ring0_stack_top:
-    dq g_ring0_stack_top
 
 ; void syscall_entry(void) — LSTAR target
+;
+; The user context (rip/rflags/rsp) is kept ON THE PER-PROCESS KERNEL STACK,
+; never in globals: sched_yield()/proc_exit_current() sti+hlt mid-syscall,
+; so another process can run a syscall while this one is parked — globals
+; would be clobbered and the parked process would sysret to the wrong rip
+; under the wrong CR3 (observed as #GP at the ring-3 hlt after exit).
 syscall_entry:
-    mov [rel g_user_rsp], rsp
-    mov [rel g_user_rip], rcx
-    mov [rel g_user_rflags], r11
-    lea rsp, [rel g_syscall_stack_top]
+    mov [rel g_scratch], rsp        ; stash user rsp; IF=0 here (SFMASK), no race
+    mov rsp, [rel g_current_kstack_top]   ; per-process kernel stack
+    push rcx                        ; [k+64] user rip
+    push r11                        ; [k+56] user rflags
+    push qword [rel g_scratch]      ; [k+48] user rsp
 
     ; SYSCALL only guarantees rcx/r11; preserve the argument registers
     ; across the C call (Linux-style: all GPRs except rax/rcx/r11 survive).
-    push rdi
-    push rsi
-    push rdx
-    push r10
-    push r8
-    push r9
+    push rdi                        ; [k+40]
+    push rsi                        ; [k+32]
+    push rdx                        ; [k+24]
+    push r10                        ; [k+16]
+    push r8                         ; [k+8]
+    push r9                         ; [k+0]
 
     ; shuffle syscall args into SysV positions:
     ; dispatch(nr, a1, a2, a3, a4, a5, a6, urip, urflags, urs)
@@ -58,10 +51,10 @@ syscall_entry:
     mov rdx, rsi         ; a2 -> arg3
     mov rsi, rdi         ; a1 -> arg2
     mov rdi, rax         ; nr -> arg1
-    push qword [rel g_user_rsp]      ; arg10
-    push qword [rel g_user_rflags]   ; arg9
-    push qword [rel g_user_rip]      ; arg8
-    push r11                         ; arg7 = a6
+    push qword [rsp+48]      ; arg10 = user rsp      (rsp=k)
+    push qword [rsp+64]      ; arg9  = user rflags   (rsp=k-8, k+56)
+    push qword [rsp+80]      ; arg8  = user rip      (rsp=k-16, k+64)
+    push r11                 ; arg7  = a6
     call syscall_dispatch
     add rsp, 32
 
@@ -73,10 +66,11 @@ syscall_entry:
     pop rsi
     pop rdi
 
-    ; restore user context and go back to ring 3
-    mov rcx, [rel g_user_rip]
-    mov r11, [rel g_user_rflags]
-    mov rsp, [rel g_user_rsp]
+    ; restore user context from this process's own kernel stack and go
+    ; back to ring 3 (rsp now = k+48: [urs][urflags][urip])
+    mov rcx, [rsp+16]
+    mov r11, [rsp+8]
+    mov rsp, [rsp]
     o64 sysret
 
 ; void enter_usermode(uint64_t entry /*rdi*/, uint64_t user_sp /*rsi*/)
