@@ -2,7 +2,12 @@
 #include "mm/kmalloc.h"
 #include "lib/string.h"
 #include "lib/uart.h"
+#include "lib/spinlock.h"
 #include "arch/x86_64/cpu.h"
+
+/* SMP (8c): the vnode table + pty rings are shared by all CPUs. Lock order:
+ * sched -> vfs -> heap -> pmm. */
+static spinlock_t g_vfs_lock = SPINLOCK_INIT;
 
 /* Phase 7b: pty — two 4 KiB rings between the master and slave endpoints. */
 #define PTY_RING 4096
@@ -49,7 +54,7 @@ int vfs_vnode_type(int vnode)
     return g_vnodes[vnode].type;
 }
 
-int vfs_open(const char *path, int flags)
+static int vfs_open_locked(const char *path, int flags)
 {
     if (path[0] == 0 || (path[0] == '/' && path[1] == 0))
         return VN_ROOT_IDX;                       /* root dir */
@@ -88,7 +93,7 @@ int vfs_open(const char *path, int flags)
 }
 
 /* Phase 7b: pty endpoints are non-blocking byte rings. */
-int vfs_pty_create(void)
+static int vfs_pty_create_locked(void)
 {
     int mi = -1, si = -1;
     for (int i = 2; i < VN_TOTAL && (mi < 0 || si < 0); i++)
@@ -110,13 +115,12 @@ int vfs_pty_create(void)
     g_vnodes[si].pty = p;
     g_vnodes[si].pty_side = 1;
     strcpy(g_vnodes[si].name, "ptys0");
-    cli();   /* atomic print: tests grep this line, timer IRQ must not split it */
+    /* caller holds g_vfs_lock with IF=0: the print is already atomic */
     uart_printf("vfs: pty created /ptym0 (vnode %d) + /ptys0 (vnode %d)\n", mi, si);
-    sti();
     return si;                                    /* slave */
 }
 
-long vfs_read(int vnode, uint32_t *offset, void *buf, long len)
+static long vfs_read_locked(int vnode, uint32_t *offset, void *buf, long len)
 {
     if (vnode < 0 || vnode >= VN_TOTAL)
         return -9;                                /* EBADF */
@@ -143,7 +147,7 @@ long vfs_read(int vnode, uint32_t *offset, void *buf, long len)
     return n;
 }
 
-long vfs_write(int vnode, uint32_t *offset, const void *buf, long len)
+static long vfs_write_locked(int vnode, uint32_t *offset, const void *buf, long len)
 {
     if (vnode < 0 || vnode >= VN_TOTAL)
         return -9;
@@ -185,7 +189,7 @@ long vfs_write(int vnode, uint32_t *offset, const void *buf, long len)
     return len;
 }
 
-long vfs_getdents(int vnode, void *buf, long len)
+static long vfs_getdents_locked(int vnode, void *buf, long len)
 {
     if (vnode != VN_ROOT_IDX)
         return -9;
@@ -202,4 +206,46 @@ long vfs_getdents(int vnode, void *buf, long len)
         n++;
     }
     return n * (long)sizeof(mirix_dirent_t);
+}
+
+/* Public entry points take the vfs lock (callers run with IF=0 in syscalls
+ * or IF=1 in the main loop — the irqsave variant covers both). */
+int vfs_open(const char *path, int flags)
+{
+    uint64_t fl = spin_lock_irqsave(&g_vfs_lock);
+    int r = vfs_open_locked(path, flags);
+    spin_unlock_irqrestore(&g_vfs_lock, fl);
+    return r;
+}
+
+int vfs_pty_create(void)
+{
+    uint64_t fl = spin_lock_irqsave(&g_vfs_lock);
+    int r = vfs_pty_create_locked();
+    spin_unlock_irqrestore(&g_vfs_lock, fl);
+    return r;
+}
+
+long vfs_read(int vnode, uint32_t *offset, void *buf, long len)
+{
+    uint64_t fl = spin_lock_irqsave(&g_vfs_lock);
+    long r = vfs_read_locked(vnode, offset, buf, len);
+    spin_unlock_irqrestore(&g_vfs_lock, fl);
+    return r;
+}
+
+long vfs_write(int vnode, uint32_t *offset, const void *buf, long len)
+{
+    uint64_t fl = spin_lock_irqsave(&g_vfs_lock);
+    long r = vfs_write_locked(vnode, offset, buf, len);
+    spin_unlock_irqrestore(&g_vfs_lock, fl);
+    return r;
+}
+
+long vfs_getdents(int vnode, void *buf, long len)
+{
+    uint64_t fl = spin_lock_irqsave(&g_vfs_lock);
+    long r = vfs_getdents_locked(vnode, buf, len);
+    spin_unlock_irqrestore(&g_vfs_lock, fl);
+    return r;
 }

@@ -39,7 +39,7 @@ def main() -> int:
 
     cmd = [
         "qemu-system-x86_64",
-        "-machine", "q35", "-cpu", "qemu64", "-m", "512M",
+        "-machine", "q35", "-cpu", "qemu64", "-smp", "4", "-m", "512M",
         "-cdrom", str(ISO),
         "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
         "-drive", f"if=pflash,format=raw,file={BUILD / 'OVMF_VARS.fd'}",

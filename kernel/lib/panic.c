@@ -19,6 +19,7 @@ static void msg_sink(void *ctx, char c)
 void kpanic(const char *fmt, ...)
 {
     cli();
+    uart_panic_begin(); /* SMP (8c): bypass the uart spinlock on the panic path */
     fb_set_mirror(0);   /* keep the red panic screen clean */
 
     static char msg[512];

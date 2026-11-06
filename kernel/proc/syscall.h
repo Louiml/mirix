@@ -34,6 +34,9 @@
 #define SYS_net_recv   23  /* (buf, maxlen) -> bytes (0 = none) */
 
 void syscall_init(void);
+/* SMP (8c): STAR/LSTAR/SFMASK/EFER.SCE are PER-CPU MSRs — every AP must run
+ * this too (ap_entry calls it), not just the BSP's syscall_init(). */
+void syscall_init_cpu(void);
 
 /* Called from syscall.asm. Args arrive in SysV order. Returns rax value. */
 uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,

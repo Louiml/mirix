@@ -7,9 +7,14 @@
 #include "lib/ttf.h"
 #include "lib/string.h"
 #include "lib/uart.h"
+#include "lib/spinlock.h"
 #include "mm/pmm.h"
 #include "mm/mm.h"
 #include "mm/kmalloc.h"
+
+/* SMP (8c): window table + z-order are shared — syscalls from any CPU mutate
+ * them while the main loop renders. Lock order: sched -> wm -> {heap, pmm}. */
+static spinlock_t g_wm_lock = SPINLOCK_INIT;
 
 static wm_win_t g_wins[WM_MAX_WINS];
 static int g_z[WM_MAX_WINS];          /* indices, back to front */
@@ -71,13 +76,13 @@ int wm_dirty(void) { return g_dirty; }
 
 void wm_commit(int wid)
 {
-    if (wid >= 0 && wid < WM_MAX_WINS && g_wins[wid].used)
-        g_dirty = 1;
-    else
-        g_dirty = 1;
+    uint64_t fl = spin_lock_irqsave(&g_wm_lock);
+    (void)wid;
+    g_dirty = 1;
+    spin_unlock_irqrestore(&g_wm_lock, fl);
 }
 
-int wm_create(int x, int y, int w, int h, const char *title, int flags)
+static int wm_create_locked(int x, int y, int w, int h, const char *title, int flags)
 {
     if (w <= 0 || h <= 0 || w > WM_WIN_MAX_DIM || h > WM_WIN_MAX_DIM)
         return -1;
@@ -109,7 +114,7 @@ int wm_create(int x, int y, int w, int h, const char *title, int flags)
     return wid;
 }
 
-void wm_close(int wid)
+static void wm_close_locked(int wid)
 {
     if (wid < 0 || wid >= WM_MAX_WINS || !g_wins[wid].used)
         return;
@@ -127,7 +132,7 @@ void wm_close(int wid)
     g_dirty = 1;
 }
 
-void wm_move(int wid, int x, int y)
+static void wm_move_locked(int wid, int x, int y)
 {
     if (wid < 0 || wid >= WM_MAX_WINS || !g_wins[wid].used)
         return;
@@ -136,7 +141,7 @@ void wm_move(int wid, int x, int y)
     g_dirty = 1;
 }
 
-void wm_resize(int wid, int w, int h)
+static void wm_resize_locked(int wid, int w, int h)
 {
     if (wid < 0 || wid >= WM_MAX_WINS || !g_wins[wid].used)
         return;
@@ -149,7 +154,7 @@ void wm_resize(int wid, int w, int h)
     g_dirty = 1;
 }
 
-void wm_focus(int wid)
+static void wm_focus_locked(int wid)
 {
     if (wid < 0 || wid >= WM_MAX_WINS || !g_wins[wid].used)
         return;
@@ -168,7 +173,7 @@ void wm_focus(int wid)
     g_dirty = 1;
 }
 
-int wm_top_at(int x, int y)
+static int wm_top_at_locked(int x, int y)
 {
     for (int i = g_nz - 1; i >= 0; i--) {
         wm_win_t *wn = &g_wins[g_z[i]];
@@ -178,6 +183,52 @@ int wm_top_at(int x, int y)
             return g_z[i];
     }
     return -1;
+}
+
+/* Public wm entry points (syscalls run with IF=0, the main loop with IF=1 —
+ * the irqsave variant covers both). */
+int wm_create(int x, int y, int w, int h, const char *title, int flags)
+{
+    uint64_t fl = spin_lock_irqsave(&g_wm_lock);
+    int r = wm_create_locked(x, y, w, h, title, flags);
+    spin_unlock_irqrestore(&g_wm_lock, fl);
+    return r;
+}
+
+void wm_close(int wid)
+{
+    uint64_t fl = spin_lock_irqsave(&g_wm_lock);
+    wm_close_locked(wid);
+    spin_unlock_irqrestore(&g_wm_lock, fl);
+}
+
+void wm_move(int wid, int x, int y)
+{
+    uint64_t fl = spin_lock_irqsave(&g_wm_lock);
+    wm_move_locked(wid, x, y);
+    spin_unlock_irqrestore(&g_wm_lock, fl);
+}
+
+void wm_resize(int wid, int w, int h)
+{
+    uint64_t fl = spin_lock_irqsave(&g_wm_lock);
+    wm_resize_locked(wid, w, h);
+    spin_unlock_irqrestore(&g_wm_lock, fl);
+}
+
+void wm_focus(int wid)
+{
+    uint64_t fl = spin_lock_irqsave(&g_wm_lock);
+    wm_focus_locked(wid);
+    spin_unlock_irqrestore(&g_wm_lock, fl);
+}
+
+int wm_top_at(int x, int y)
+{
+    uint64_t fl = spin_lock_irqsave(&g_wm_lock);
+    int r = wm_top_at_locked(x, y);
+    spin_unlock_irqrestore(&g_wm_lock, fl);
+    return r;
 }
 
 /* ---------------- drawing helpers (back buffer) ------------------------- */
@@ -209,7 +260,7 @@ static void circle(int cx, int cy, int r, uint32_t rgb)
 
 /* ---------------- full composite ---------------------------------------- */
 
-void wm_render(void)
+static void wm_render_locked(void)
 {
     if (!fb_ready())
         return;
@@ -299,4 +350,11 @@ void wm_render(void)
         }
     }
     g_dirty = 0;
+}
+
+void wm_render(void)
+{
+    uint64_t fl = spin_lock_irqsave(&g_wm_lock);
+    wm_render_locked();
+    spin_unlock_irqrestore(&g_wm_lock, fl);
 }

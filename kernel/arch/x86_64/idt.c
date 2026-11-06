@@ -8,6 +8,7 @@
 #include "drivers/lapic.h"
 #include "drivers/ps2.h"
 #include "proc/thread.h"
+#include "smp.h"
 
 /* Stub address tables built in isr.asm */
 extern const uint64_t isr_stub_table[32];
@@ -15,6 +16,7 @@ extern const uint64_t irq_stub_table[32];
 
 static idt_entry_t g_idt[256];
 static idtr_t g_idtr;
+volatile int g_idt_ready;
 
 static const char *exception_names[32] = {
     [0] = "#DE divide error",      [1] = "#DB debug",              [2] = "NMI",
@@ -54,16 +56,24 @@ void idt_init(void)
     /* 64..255 left null: any such interrupt triple-faults (good: loud bug) */
 
     __asm__ volatile ("lidt %0" : : "m"(g_idtr));
+    g_idt_ready = 1;      /* SMP: APs wait for this before their own lidt */
     uart_printf("idt: 256 gates loaded, exceptions 0-31 + IRQs 32-63\n");
+}
+
+void idt_load(void)
+{
+    __asm__ volatile ("lidt %0" : : "m"(g_idtr));
 }
 
 void isr_handler(registers_t *regs)
 {
     if (regs->vector < 32) {
-        uart_printf("exception: %s (vector %llu, error 0x%llx) at rip=%p\n",
+        uart_printf("exception: %s (vector %llu, error 0x%llx) at rip=%p cpu=%d proc=%s\n",
                     exception_names[regs->vector],
                     (unsigned long long)regs->vector,
-                    (unsigned long long)regs->error, (void *)regs->rip);
+                    (unsigned long long)regs->error, (void *)regs->rip,
+                    this_cpu() ? this_cpu()->cpu : -1,
+                    current_thread_name());
         panic_dump_regs(regs);   /* prints full dump + red screen; no return */
     }
     kpanic("unexpected isr vector %llu\n", (unsigned long long)regs->vector);

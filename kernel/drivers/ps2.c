@@ -26,27 +26,37 @@ static void cmd(uint8_t c)  { wait_write(); outb(PS2_CMD, c); }
 static void data_w(uint8_t b) { wait_write(); outb(PS2_DATA, b); }
 static uint8_t data_r(void) { wait_read(); return inb(PS2_DATA); }
 
-/* ---- key event ring buffer (single producer = IRQ, single consumer) ---- */
+/* ---- key event ring buffer (producer = IRQ, consumer = syscall/main) ----
+ * SMP (8c): all rings + cursor position are behind one spinlock (a leaf). */
+#include "lib/spinlock.h"
+static spinlock_t g_input_lock = SPINLOCK_INIT;
+
 #define KBD_RING 256
 static kbd_event_t g_ring[KBD_RING];
 static volatile uint32_t g_head, g_tail;
 
-static void kbd_push(const kbd_event_t *ev)
+static void kbd_push(const kbd_event_t *ev)   /* IRQ context: IF=0 */
 {
+    spin_lock(&g_input_lock);
     uint32_t h = g_head;
     g_ring[h % KBD_RING] = *ev;
     g_head = h + 1;
     if (g_head - g_tail > KBD_RING)   /* overflow: drop oldest */
         g_tail = g_head - KBD_RING;
+    spin_unlock(&g_input_lock);
 }
 
 int kbd_pop(kbd_event_t *out)
 {
-    if (g_tail == g_head)
-        return 0;
-    *out = g_ring[g_tail % KBD_RING];
-    g_tail++;
-    return 1;
+    uint64_t fl = spin_lock_irqsave(&g_input_lock);
+    int ok = 0;
+    if (g_tail != g_head) {
+        *out = g_ring[g_tail % KBD_RING];
+        g_tail++;
+        ok = 1;
+    }
+    spin_unlock_irqrestore(&g_input_lock, fl);
+    return ok;
 }
 
 /* ---- mouse: 3-byte packets on IRQ12, own ring + absolute position ---- */
@@ -56,29 +66,37 @@ static volatile uint32_t g_mhead, g_mtail;
 static int g_mx, g_my;                 /* absolute cursor position */
 static uint8_t g_mbtn;
 
-static void mouse_push(const mouse_event_t *ev)
+static void mouse_push(const mouse_event_t *ev)   /* IRQ context: IF=0 */
 {
+    spin_lock(&g_input_lock);
     uint32_t h = g_mhead;
     g_mring[h % MOUSE_RING] = *ev;
     g_mhead = h + 1;
     if (g_mhead - g_mtail > MOUSE_RING)
         g_mtail = g_mhead - MOUSE_RING;
+    spin_unlock(&g_input_lock);
 }
 
 int mouse_pop(mouse_event_t *out)
 {
-    if (g_mtail == g_mhead)
-        return 0;
-    *out = g_mring[g_mtail % MOUSE_RING];
-    g_mtail++;
-    return 1;
+    uint64_t fl = spin_lock_irqsave(&g_input_lock);
+    int ok = 0;
+    if (g_mtail != g_mhead) {
+        *out = g_mring[g_mtail % MOUSE_RING];
+        g_mtail++;
+        ok = 1;
+    }
+    spin_unlock_irqrestore(&g_input_lock, fl);
+    return ok;
 }
 
 void mouse_get_pos(int *x, int *y, uint8_t *buttons)
 {
+    uint64_t fl = spin_lock_irqsave(&g_input_lock);
     *x = g_mx;
     *y = g_my;
     *buttons = g_mbtn;
+    spin_unlock_irqrestore(&g_input_lock, fl);
 }
 
 int input_pop_filtered(input_event_t *out, int filter)
@@ -133,6 +151,7 @@ void ps2_mouse_irq(void)
     mouse_event_t ev = { dx, (int16_t)-dy, buttons };
     mouse_push(&ev);
 
+    spin_lock(&g_input_lock);            /* IRQ context: IF=0 */
     g_mbtn = buttons;
     if (fb_ready()) {
         int nx = g_mx + dx, ny = g_my - dy;
@@ -144,6 +163,7 @@ void ps2_mouse_irq(void)
         g_my = ny;
         fb_set_cursor(g_mx, g_my, 1);
     }
+    spin_unlock(&g_input_lock);
 }
 
 /* ---- scancode set 1 -> ASCII (with shift variants) ---- */

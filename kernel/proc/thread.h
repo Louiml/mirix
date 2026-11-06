@@ -35,10 +35,9 @@ uint64_t sched_switches(void);
 const char *current_thread_name(void);
 int current_thread_id(void);
 
-/* Top of the running process's kernel stack — syscall_entry switches to it. */
-extern uint64_t g_current_kstack_top;
-
-/* PML4 physical address of the currently running process. */
+/* PML4 physical address of the process running on THIS CPU (SMP, 8c:
+ * per-CPU state lives in percpu_t via KERNEL_GS_BASE; syscall.asm reads the
+ * current kernel stack top from [gs:8]). */
 uint64_t current_pml4_phys(void);
 
 /* Per-process file descriptor table (fds 0/1/2 = console vnode 0). */

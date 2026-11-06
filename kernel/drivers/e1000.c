@@ -151,7 +151,7 @@ void e1000_get_mac(uint8_t mac[6])
         memcpy(mac, g_mac, 6);
 }
 
-int e1000_send(const void *frame, uint16_t len)
+static int e1000_send_locked(const void *frame, uint16_t len)
 {
     if (!g_ok || len > PKT_BUF)
         return -1;
@@ -177,7 +177,7 @@ int e1000_send(const void *frame, uint16_t len)
     return (d->status & 0x01) ? 0 : -2;
 }
 
-long e1000_recv(void *buf, long maxlen)
+static long e1000_recv_locked(void *buf, long maxlen)
 {
     if (!g_ok)
         return -1;
@@ -192,4 +192,25 @@ long e1000_recv(void *buf, long maxlen)
     g_rx_idx = (g_rx_idx + 1) % NUM_RX;
     wr32(REG_RDT, (uint32_t)g_rx_idx);
     return n;
+}
+
+/* SMP (8c): one lock guards the TX/RX rings — a leaf lock (send polls with
+ * msleep, so it must NOT be taken while holding sched/vfs/wm). */
+#include "lib/spinlock.h"
+static spinlock_t g_net_lock = SPINLOCK_INIT;
+
+int e1000_send(const void *frame, uint16_t len)
+{
+    uint64_t fl = spin_lock_irqsave(&g_net_lock);
+    int r = e1000_send_locked(frame, len);
+    spin_unlock_irqrestore(&g_net_lock, fl);
+    return r;
+}
+
+long e1000_recv(void *buf, long maxlen)
+{
+    uint64_t fl = spin_lock_irqsave(&g_net_lock);
+    long r = e1000_recv_locked(buf, maxlen);
+    spin_unlock_irqrestore(&g_net_lock, fl);
+    return r;
 }

@@ -12,6 +12,9 @@ void timer_init(void);          /* calibrate TSC via PIT, start LAPIC timer */
 void timer_irq(void);           /* called from idt.c on TIMER_IRQ_VECTOR */
 uint64_t timer_ticks(void);
 uint64_t timer_tsc_hz(void);
+uint64_t timer_lapic_hz(void);  /* SMP: calibrated APIC bus rate (for APs) */
 void msleep(uint64_t ms);       /* busy-wait using the calibrated TSC */
+
+extern volatile int g_timer_ready;   /* SMP: set at the end of timer_init() */
 
 #endif

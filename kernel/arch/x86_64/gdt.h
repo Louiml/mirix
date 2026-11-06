@@ -67,6 +67,7 @@ typedef struct {
 #define RPL_USER  3
 
 void gdt_init(void);
+void gdt_init_cpu(int cpu);   /* SMP (8c): per-CPU GDT/TSS, slot = lapic id */
 void tss_set_rsp0(uint64_t rsp);
 
 #endif

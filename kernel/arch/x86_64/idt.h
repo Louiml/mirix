@@ -32,6 +32,11 @@ typedef struct {
 
 void idt_init(void);
 
+/* SMP (8c): the IDT itself is shared; each AP just needs to lidt it once the
+ * table is filled by the BSP. */
+void idt_load(void);
+extern volatile int g_idt_ready;   /* set at the end of idt_init() */
+
 /* C handlers called from isr.asm */
 void isr_handler(registers_t *regs);
 void irq_handler(registers_t *regs);

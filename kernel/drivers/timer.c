@@ -2,10 +2,13 @@
 #include "pit.h"
 #include "lapic.h"
 #include "arch/x86_64/cpu.h"
+#include "arch/x86_64/smp.h"
 #include "lib/uart.h"
 
-static volatile uint64_t g_ticks;
+static volatile uint64_t g_ticks;    /* SMP: total ticks across all CPUs */
 static uint64_t g_tsc_hz;
+static uint64_t g_lapic_hz;
+volatile int g_timer_ready;
 
 /* Calibrate the TSC: run PIT channel 0 one-shot for a known number of
  * 1.193182 MHz ticks and measure how many TSC ticks elapse. */
@@ -71,16 +74,22 @@ void timer_init(void)
     uart_printf("lapic: timer started (periodic), vector 0x%x, %d Hz (%llu ticks/period)\n",
                 TIMER_IRQ_VECTOR, TIMER_HZ, (unsigned long long)(lapic_hz / TIMER_HZ));
     g_ticks = 0;
+    g_lapic_hz = lapic_hz;
+    g_timer_ready = 1;      /* SMP: APs wait for this before starting theirs */
 }
 
 void timer_irq(void)
 {
-    g_ticks++;
+    __sync_fetch_and_add(&g_ticks, 1);       /* SMP: global counter, atomic */
+    percpu_t *c = this_cpu();
+    if (c)
+        c->ticks++;                         /* per-CPU quantum counter */
     lapic_eoi();
 }
 
 uint64_t timer_ticks(void) { return g_ticks; }
 uint64_t timer_tsc_hz(void) { return g_tsc_hz; }
+uint64_t timer_lapic_hz(void) { return g_lapic_hz; }
 
 void msleep(uint64_t ms)
 {

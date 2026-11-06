@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 8b: kernel entered"
+BANNER = "MirixOS phase 8c: kernel entered"
 
 HD = BUILD / "mirix.img"
 
@@ -89,7 +89,7 @@ def main() -> int:
 
     cmd = [
         "qemu-system-x86_64",
-        "-machine", "q35", "-cpu", "qemu64", "-m", "512M",
+        "-machine", "q35", "-cpu", "qemu64", "-smp", "4", "-m", "512M",
         "-cdrom", str(ISO),
         "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
         "-drive", f"if=pflash,format=raw,file={BUILD / 'OVMF_VARS.fd'}",
@@ -338,6 +338,11 @@ def main() -> int:
         "acpi: FADT" in serial
         and "PM1a_CNT port" in serial
     )
+    # Phase 8c: SMP — Limine MP started 3 APs, all came online (4 CPUs total)
+    ok_smp = (
+        "smp: Limine reports 4 cpus" in serial
+        and "smp: 4 cpus online" in serial
+    )
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -361,6 +366,7 @@ def main() -> int:
         and ok_files
         and ok_net
         and ok_acpi
+        and ok_smp
     )
 
     ok_screen = False

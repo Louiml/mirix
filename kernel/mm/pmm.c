@@ -3,6 +3,10 @@
 #include "lib/string.h"
 #include "lib/uart.h"
 #include "lib/panic.h"
+#include "lib/spinlock.h"
+
+/* SMP (8c): the bitmap is shared by all CPUs — every mutator takes this. */
+static spinlock_t g_pmm_lock = SPINLOCK_INIT;
 
 static uint8_t *g_bitmap;        /* accessed via HHDM */
 static uint64_t g_bitmap_phys;
@@ -76,7 +80,7 @@ void pmm_init(struct limine_memmap_response *mm)
                 (unsigned long long)(g_free_pages * PAGE_SIZE >> 20));
 }
 
-uint64_t pmm_alloc_page(void)
+static uint64_t pmm_alloc_page_locked(void)
 {
     /* Word-skip scan: a full 0xff qword has no free page. */
     uint64_t words = (g_total_pages + 63) / 64;
@@ -98,7 +102,7 @@ uint64_t pmm_alloc_page(void)
     return 0;
 }
 
-uint64_t pmm_alloc_pages_contig(uint64_t n)
+static uint64_t pmm_alloc_pages_contig_locked(uint64_t n)
 {
     if (n == 0)
         return 0;
@@ -120,13 +124,36 @@ uint64_t pmm_alloc_pages_contig(uint64_t n)
     return 0;
 }
 
-void pmm_free_page(uint64_t phys)
+static void pmm_free_page_locked(uint64_t phys)
 {
     uint64_t i = phys / PAGE_SIZE;
     if (i >= g_total_pages || !bm_test(i))
         return;   /* double free / out of range: ignore quietly */
     bm_clear(i);
     g_free_pages++;
+}
+
+uint64_t pmm_alloc_page(void)
+{
+    uint64_t fl = spin_lock_irqsave(&g_pmm_lock);
+    uint64_t r = pmm_alloc_page_locked();
+    spin_unlock_irqrestore(&g_pmm_lock, fl);
+    return r;
+}
+
+uint64_t pmm_alloc_pages_contig(uint64_t n)
+{
+    uint64_t fl = spin_lock_irqsave(&g_pmm_lock);
+    uint64_t r = pmm_alloc_pages_contig_locked(n);
+    spin_unlock_irqrestore(&g_pmm_lock, fl);
+    return r;
+}
+
+void pmm_free_page(uint64_t phys)
+{
+    uint64_t fl = spin_lock_irqsave(&g_pmm_lock);
+    pmm_free_page_locked(phys);
+    spin_unlock_irqrestore(&g_pmm_lock, fl);
 }
 
 uint64_t pmm_free_pages(void) { return g_free_pages; }

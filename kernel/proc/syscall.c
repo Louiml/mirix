@@ -1,6 +1,7 @@
 #include "syscall.h"
 #include "arch/x86_64/cpu.h"
 #include "arch/x86_64/gdt.h"
+#include "arch/x86_64/smp.h"
 #include "lib/uart.h"
 #include "lib/panic.h"
 #include "lib/string.h"
@@ -48,7 +49,7 @@ static int user_strcpy(char *dst, uint64_t src, size_t max)
     return 0;
 }
 
-void syscall_init(void)
+void syscall_init_cpu(void)
 {
     wrmsr(MSR_EFER, rdmsr(MSR_EFER) | EFER_SCE);
     /* STAR: [47:32] = kernel CS (syscall: CS=0x08, SS=0x10),
@@ -57,7 +58,11 @@ void syscall_init(void)
     wrmsr(MSR_LSTAR, (uint64_t)syscall_entry);
     wrmsr(MSR_SFMASK, 0x200);   /* clear IF on syscall entry */
     /* TSS rsp0 is set per-process by the scheduler (sched_switch_from_irq). */
+}
 
+void syscall_init(void)
+{
+    syscall_init_cpu();   /* BSP */
     uart_printf("syscall: STAR=%llx LSTAR=%p SFMASK=0x200\n",
                 (unsigned long long)rdmsr(MSR_STAR), (void *)(uint64_t)syscall_entry);
 }

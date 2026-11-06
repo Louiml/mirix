@@ -36,13 +36,15 @@ KERNEL_SRCS := $(shell find kernel -name '*.c')
 KERNEL_ASMS := $(shell find kernel -name '*.asm')
 KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD)/obj/%.o,$(KERNEL_SRCS)) \
                $(patsubst kernel/%.asm,$(BUILD)/obj-asm/%.o,$(KERNEL_ASMS))
-# generated headers must exist before compiling kernel objects that include them
-$(KERNEL_OBJS): | $(USER_HDRS) $(FONT_HDR)
+# Generated headers (embedded user ELFs + font) are baked INTO the objects at
+# compile time, so they must be NORMAL prerequisites — an order-only dep here
+# made the link use a stale main.o with an old embedded hello (phase 8c bug).
+$(KERNEL_OBJS): $(USER_HDRS) $(FONT_HDR)
 
 QEMU       := qemu-system-x86_64
 OVMF_CODE  := /usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS  := /usr/share/OVMF/OVMF_VARS_4M.fd
-QEMU_UEFI  := -machine q35 -cpu qemu64 -m 512M -cdrom $(BUILD)/mirixos.iso \
+QEMU_UEFI  := -machine q35 -cpu qemu64 -smp 4 -m 512M -cdrom $(BUILD)/mirixos.iso \
               -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
               -drive if=pflash,format=raw,file=$(BUILD)/OVMF_VARS.fd \
               -no-reboot

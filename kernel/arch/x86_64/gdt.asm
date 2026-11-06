@@ -13,7 +13,8 @@ gdt_flush:
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
+    ; NOTE: do NOT reload gs here — loading a selector would reset the GS
+    ; base to 0 and clobber the per-CPU base set via the GS_BASE MSR (SMP).
     mov ss, ax
     push qword 0x08       ; SEL_KCODE
     lea rax, [rel .done]

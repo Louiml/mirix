@@ -4,6 +4,11 @@
 #include "vmm.h"
 #include "lib/string.h"
 #include "lib/uart.h"
+#include "lib/spinlock.h"
+
+/* SMP (8c): the block list is shared by all CPUs — every mutator takes this.
+ * Lock order: callers may hold sched/vfs/wm, then heap, then pmm. */
+static spinlock_t g_heap_lock = SPINLOCK_INIT;
 
 #define KHEAP_VIRT      0xffffffffc0000000ULL
 #define KHEAP_MAX_GROW  (32ULL << 20)     /* 32 MiB ceiling for now */
@@ -63,7 +68,7 @@ static void append_block(block_t *b)
     }
 }
 
-void *kmalloc(size_t size)
+static void *kmalloc_locked(size_t size)
 {
     if (size == 0)
         size = 1;
@@ -98,7 +103,7 @@ void *kmalloc(size_t size)
     return (char *)b + sizeof(block_t);
 }
 
-void kfree(void *p)
+static void kfree_locked(void *p)
 {
     if (!p)
         return;
@@ -112,13 +117,30 @@ void kfree(void *p)
     }
 }
 
+void *kmalloc(size_t size)
+{
+    uint64_t fl = spin_lock_irqsave(&g_heap_lock);
+    void *r = kmalloc_locked(size);
+    spin_unlock_irqrestore(&g_heap_lock, fl);
+    return r;
+}
+
+void kfree(void *p)
+{
+    uint64_t fl = spin_lock_irqsave(&g_heap_lock);
+    kfree_locked(p);
+    spin_unlock_irqrestore(&g_heap_lock, fl);
+}
+
 void heap_stats(uint64_t *used, uint64_t *freeb, uint64_t *nblocks)
 {
+    uint64_t fl = spin_lock_irqsave(&g_heap_lock);
     uint64_t u = 0, f = 0, n = 0;
     for (block_t *b = g_blocks; b; b = b->next) {
         n++;
         if (b->free) f += b->size; else u += b->size;
     }
+    spin_unlock_irqrestore(&g_heap_lock, fl);
     *used = u; *freeb = f; *nblocks = n;
 }
 

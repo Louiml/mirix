@@ -17,6 +17,7 @@
 #include "arch/x86_64/gdt.h"
 #include "arch/x86_64/idt.h"
 #include "arch/x86_64/cpu.h"
+#include "arch/x86_64/smp.h"
 #include "mm/mm.h"
 #include "mm/pmm.h"
 #include "mm/vmm.h"
@@ -63,6 +64,9 @@ static volatile struct limine_framebuffer_request framebuffer_request LIMINE_REQ
 static volatile struct limine_rsdp_request rsdp_request LIMINE_REQ = {
     .id = LIMINE_RSDP_REQUEST_ID, .revision = 0, .response = 0,
 };
+static volatile struct limine_mp_request mp_request LIMINE_REQ = {
+    .id = LIMINE_MP_REQUEST_ID, .revision = 0, .response = 0,
+};
 
 static volatile uint64_t requests_end[4] LIMINE_REQ = LIMINE_REQUESTS_END_MARKER;
 
@@ -96,7 +100,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 8b: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 8c: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -151,6 +155,11 @@ void _start(void)
     idt_init();
     pic_init();
     uart_printf("cpu core: gdt/tss/idt/pic ready (exceptions -> red panic screen)\n");
+
+    /* Phase 8c: SMP — point KERNEL_GS_BASE at the BSP's percpu block and let
+     * Limine release all APs into ap_entry() (they spin until the IDT, timer
+     * and scheduler are ready, then start their own LAPIC timers). */
+    smp_bsp_init((struct limine_mp_request *)&mp_request);
 
     /* Phase 2b: physical memory manager over the Limine memmap */
     if (memmap_request.response == 0)
@@ -249,6 +258,10 @@ void _start(void)
                     (unsigned long long)timer_ticks());
         sti();
     }
+
+    /* Phase 8c: wait for all APs to finish coming online (they needed the
+     * IDT + timer + scheduler, which sched_init just enabled). */
+    smp_wait_online();
 
     /* Optional deliberate crash for the automated test: cmdline "crash" */
     const char *cmdline = (cmdline_request.response != 0)

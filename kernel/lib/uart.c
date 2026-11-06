@@ -1,11 +1,22 @@
 #include "uart.h"
 #include "io.h"
 #include "printf.h"
+#include "spinlock.h"
 #include "drivers/fb.h"
 
 #include <stdarg.h>
 
 #define COM1 0x3F8
+
+/* SMP (8c): one lock for the whole line so output from different CPUs never
+ * interleaves. g_uart_nolock is set by the panic path (see uart_panic_begin). */
+static spinlock_t g_uart_lock = SPINLOCK_INIT;
+static volatile int g_uart_nolock;
+
+void uart_panic_begin(void)
+{
+    g_uart_nolock = 1;
+}
 
 /* 16550 register offsets */
 #define UART_DATA   0  /* data / divisor latch low  (DLAB=1) */
@@ -43,14 +54,28 @@ void uart_putc(char c)
 
 void uart_puts(const char *s)
 {
+    if (g_uart_nolock) {
+        while (*s)
+            uart_putc(*s++);
+        return;
+    }
+    uint64_t fl = spin_lock_irqsave(&g_uart_lock);
     while (*s)
         uart_putc(*s++);
+    spin_unlock_irqrestore(&g_uart_lock, fl);
 }
 
 void uart_write(const char *buf, unsigned long n)
 {
+    if (g_uart_nolock) {
+        for (unsigned long i = 0; i < n; i++)
+            uart_putc(buf[i]);
+        return;
+    }
+    uint64_t fl = spin_lock_irqsave(&g_uart_lock);
     for (unsigned long i = 0; i < n; i++)
         uart_putc(buf[i]);
+    spin_unlock_irqrestore(&g_uart_lock, fl);
 }
 
 static void uart_sink(void *ctx, char c)
@@ -63,6 +88,12 @@ void uart_printf(const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-    kvprintf(uart_sink, 0, fmt, ap);
+    if (g_uart_nolock) {
+        kvprintf(uart_sink, 0, fmt, ap);
+    } else {
+        uint64_t fl = spin_lock_irqsave(&g_uart_lock);
+        kvprintf(uart_sink, 0, fmt, ap);
+        spin_unlock_irqrestore(&g_uart_lock, fl);
+    }
     va_end(ap);
 }
