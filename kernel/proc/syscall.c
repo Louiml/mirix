@@ -7,6 +7,9 @@
 #include "proc/thread.h"
 #include "fs/vfs.h"
 #include "drivers/ps2.h"
+#include "drivers/ahci.h"
+#include "mm/pmm.h"
+#include "mm/mm.h"
 
 #define MSR_EFER    0xc0000080
 #define MSR_STAR    0xc0000081
@@ -125,6 +128,26 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
         if (!is_user_addr(buf) || !is_user_addr(buf + len))
             return (uint64_t)-2;
         return (uint64_t)sched_ps((void *)buf, (long)len);
+    }
+    case SYS_diskread: {
+        uint64_t lba = a1, nsec = a2, buf = a3;
+        if (nsec == 0 || nsec > AHCI_MAX_SECTORS_PER_READ)
+            return (uint64_t)-22;               /* EINVAL */
+        if (!is_user_addr(buf) || !is_user_addr(buf + nsec * 512))
+            return (uint64_t)-2;
+        if (!ahci_port_online())
+            return (uint64_t)-19;               /* ENODEV */
+        /* Bounce through a contiguous PMM block (the HBA needs phys addr). */
+        uint64_t pages = (nsec * 512 + PAGE_SIZE - 1) / PAGE_SIZE;
+        uint64_t blk = pmm_alloc_pages_contig(pages);
+        if (!blk)
+            return (uint64_t)-12;
+        long n = ahci_read(lba, (uint32_t)nsec, phys_to_virt(blk));
+        if (n > 0)
+            memcpy((void *)buf, phys_to_virt(blk), (size_t)n);
+        for (uint64_t p = blk; p < blk + pages * PAGE_SIZE; p += PAGE_SIZE)
+            pmm_free_page(p);
+        return (uint64_t)n;
     }
     case SYS_gettid:
         return (uint64_t)current_thread_id();

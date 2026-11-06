@@ -29,6 +29,26 @@ static void pci_map_ecam(void)
         vmm_map(PCI_ECAM_VIRT + i, PCI_ECAM_PHYS + i, PTE_PRESENT | PTE_RW);
 }
 
+uint32_t pci_conf_read32(const pci_dev_t *d, uint8_t off)
+{
+    return pci_read32(d->bus, d->dev, d->func, off);
+}
+
+void pci_conf_write32(const pci_dev_t *d, uint8_t off, uint32_t v)
+{
+    uint64_t addr = PCI_ECAM_VIRT +
+                    ((uint32_t)d->bus << 20 | (uint32_t)d->dev << 15 |
+                     (uint32_t)d->func << 12 | off);
+    *(volatile uint32_t *)addr = v;
+}
+
+void pci_enable_mem_busmaster(const pci_dev_t *d)
+{
+    uint32_t cmd = pci_conf_read32(d, 0x04);
+    cmd |= 0x06;   /* bit1 memory space, bit2 bus master */
+    pci_conf_write32(d, 0x04, cmd);
+}
+
 int pci_count(void) { return g_ndevs; }
 const pci_dev_t *pci_devices(void) { return g_devs; }
 
@@ -69,10 +89,12 @@ void pci_init(void)
             d->subclass = (uint8_t)(creg >> 16);
             d->class = (uint8_t)(creg >> 24);
             d->header_type = hdr;
-            d->bar0 = pci_read32(0, dev, func, 0x10);
-            uart_printf("pci: %02x:%02x.%d %04x:%04x class=%02x.%02x.%02x rev=%02x bar0=%08x\n",
+            for (int b = 0; b < 6; b++)
+                d->bar[b] = pci_read32(0, dev, func, 0x10 + b * 4);
+            uart_printf("pci: %02x:%02x.%d %04x:%04x class=%02x.%02x.%02x rev=%02x bar0=%08x bar5=%08x\n",
                         d->bus, d->dev, d->func, d->vendor, d->device,
-                        d->class, d->subclass, d->progif, d->rev, d->bar0);
+                        d->class, d->subclass, d->progif, d->rev,
+                        d->bar[0], d->bar[5]);
         }
     }
     uart_printf("pci: enumerated %d devices (ECAM phys %p, virt %p)\n",

@@ -98,6 +98,28 @@ uint64_t pmm_alloc_page(void)
     return 0;
 }
 
+uint64_t pmm_alloc_pages_contig(uint64_t n)
+{
+    if (n == 0)
+        return 0;
+    uint64_t run = 0, start = 0;
+    for (uint64_t i = 0; i < g_total_pages; i++) {
+        if (!bm_test(i)) {
+            if (run == 0)
+                start = i;
+            if (++run == n) {
+                for (uint64_t p = start; p < start + n; p++)
+                    bm_set(p);
+                g_free_pages -= n;
+                return start * PAGE_SIZE;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    return 0;
+}
+
 void pmm_free_page(uint64_t phys)
 {
     uint64_t i = phys / PAGE_SIZE;

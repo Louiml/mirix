@@ -8,6 +8,7 @@
 
 void pmm_init(struct limine_memmap_response *mm);
 uint64_t pmm_alloc_page(void);      /* physical address, 0 on OOM */
+uint64_t pmm_alloc_pages_contig(uint64_t n);  /* n physically contiguous pages (DMA), 0 on OOM */
 void pmm_free_page(uint64_t phys);
 uint64_t pmm_free_pages(void);
 uint64_t pmm_total_pages(void);

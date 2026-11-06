@@ -77,6 +77,11 @@ $(BUILD)/%_elf.h: $(BUILD)/%.elf
 iso: $(KERNEL_ELF)
 	python3 tools/mkiso.py
 
+# Raw disk image attached to QEMU's AHCI (ide-hd on ide.0) for the 4c test.
+$(BUILD)/mirix.img: tools/mkdisk.py
+	@mkdir -p $(BUILD)
+	python3 tools/mkdisk.py $@
+
 # Interactive UEFI boot with GUI (WSLg) and serial on the terminal.
 run: iso
 	cp -f $(OVMF_VARS) $(BUILD)/OVMF_VARS.fd
@@ -92,11 +97,11 @@ run-headless: iso
 	$(QEMU) $(QEMU_UEFI) -display none -serial file:$(BUILD)/serial.log
 
 # Automated boot test: boots headless, greps serial log for the banner.
-test-boot: iso
+test-boot: iso $(BUILD)/mirix.img
 	bash tools/test_boot.sh
 
 # Panic-path test: boots a crash-cmdline ISO, expects a #PF panic screen.
-test-crash:
+test-crash: $(BUILD)/mirix.img
 	MIRIXOS_CMDLINE=crash MIRIXOS_ISO_NAME=mirixos-crash.iso python3 tools/mkiso.py
 	python3 tools/test_crash.py
 

@@ -53,6 +53,15 @@ int strncmp(const char *a, const char *b, size_t n)
     return (unsigned char)*a - (unsigned char)*b;
 }
 
+int memcmp(const void *a, const void *b, size_t n)
+{
+    const unsigned char *x = a, *y = b;
+    for (size_t i = 0; i < n; i++)
+        if (x[i] != y[i])
+            return (int)x[i] - (int)y[i];
+    return 0;
+}
+
 char *strcpy(char *dst, const char *src)
 {
     char *d = dst;

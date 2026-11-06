@@ -29,7 +29,9 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 5b: kernel entered"
+BANNER = "MirixOS phase 4c: kernel entered"
+
+HD = BUILD / "mirix.img"
 
 
 def strip_ansi(data: bytes) -> str:
@@ -91,6 +93,8 @@ def main() -> int:
         "-cdrom", str(ISO),
         "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
         "-drive", f"if=pflash,format=raw,file={BUILD / 'OVMF_VARS.fd'}",
+        "-drive", f"if=none,id=hd0,file={HD},format=raw",
+        "-device", "ide-hd,drive=hd0,bus=ide.0",
         "-display", "none",
         "-serial", f"file:{SERIAL}",
         "-monitor", f"unix:{MON},server,nowait",
@@ -158,6 +162,9 @@ def main() -> int:
             wait_for(("ls: 1 entries", "  hello.txt (16 bytes)"))
             send_keys(("p", "s", "ret"))
             wait_for(("name=shell", "name=userA"))
+            # diskread 0 — the shell reads the AHCI disk via SYS_diskread
+            send_keys(("d", "i", "s", "k", "r", "e", "a", "d", "spc", "0", "ret"))
+            wait_for(("disk: LBA 0 read 4096 bytes, first 32: 'MIRIXAHCI0MirixOS AHCI",))
             s.sendall(f"screendump {SHOT_TMP}\n".encode())
             try:
                 s.recv(4096)
@@ -225,6 +232,12 @@ def main() -> int:
         and "fsdemo: read back: mirixfs says hi" in serial
         and "fsdemo: ls / (1 entries): hello.txt" in serial
     )
+    ok_ahci = (
+        "ahci: port 0 online" in serial
+        and "ahci: LBA 0 read OK (4096 bytes), magic='MIRIXAHCI0" in serial
+        and "ahci: LBA 100 read OK (4096 bytes), magic='MIRIXLBA100" in serial
+        and "disk: LBA 0 read 4096 bytes, first 32: 'MIRIXAHCI0MirixOS AHCI" in serial
+    )
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -240,6 +253,7 @@ def main() -> int:
         and ok_pci
         and ok_shell
         and ok_fs
+        and ok_ahci
     )
 
     ok_screen = False

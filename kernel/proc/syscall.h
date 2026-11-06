@@ -14,6 +14,7 @@
 #define SYS_close    6
 #define SYS_getdents 7
 #define SYS_ps       8
+#define SYS_diskread 9   /* (lba, nsec, buf) -> bytes read from AHCI disk */
 
 void syscall_init(void);
 

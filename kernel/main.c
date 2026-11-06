@@ -24,6 +24,7 @@
 #include "drivers/timer.h"
 #include "drivers/pci.h"
 #include "drivers/ps2.h"
+#include "drivers/ahci.h"
 #include "fs/vfs.h"
 #include "proc/thread.h"
 #include "proc/syscall.h"
@@ -86,7 +87,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 5b: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 4c: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -230,6 +231,22 @@ void _start(void)
     pci_init();
     ps2_init();
     vfs_init();
+
+    /* Phase 4c: AHCI — bring up the first SATA port and read the test disk. */
+    if (ahci_init() == 0) {
+        static char diskbuf[8 * 512];
+        long n = ahci_read(0, 8, diskbuf);
+        if (n > 0 && memcmp(diskbuf, "MIRIXAHCI0", 10) == 0)
+            uart_printf("ahci: LBA 0 read OK (%ld bytes), magic='%.10s'\n", n, diskbuf);
+        else
+            uart_printf("ahci: LBA 0 read %ld bytes but magic MISMATCH ('%.10s')\n",
+                        n, n > 0 ? diskbuf : "");
+        n = ahci_read(100, 8, diskbuf);
+        if (n > 0 && memcmp(diskbuf, "MIRIXLBA100", 11) == 0)
+            uart_printf("ahci: LBA 100 read OK (%ld bytes), magic='%.11s'\n", n, diskbuf);
+        else
+            uart_printf("ahci: LBA 100 read %ld bytes, magic MISMATCH\n", n);
+    }
 
     /* Phase 5a: syscalls + per-process address spaces; 2 demo processes +
      * the interactive shell (mirsh) reading the keyboard via read(0). */

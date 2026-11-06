@@ -43,6 +43,8 @@ def main() -> int:
         "-cdrom", str(ISO),
         "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
         "-drive", f"if=pflash,format=raw,file={BUILD / 'OVMF_VARS.fd'}",
+        "-drive", f"if=none,id=hd0,file={BUILD / 'mirix.img'},format=raw",
+        "-device", "ide-hd,drive=hd0,bus=ide.0",
         "-display", "none",
         "-serial", f"file:{SERIAL}",
         "-monitor", f"unix:{MON},server,nowait",

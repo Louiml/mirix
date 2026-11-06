@@ -21,6 +21,7 @@ static long syscall3(long nr, long a1, long a2, long a3)
 #define SYS_close    6
 #define SYS_getdents 7
 #define SYS_ps       8
+#define SYS_diskread 9
 
 #define O_RDONLY 0
 #define O_WRONLY 1
@@ -33,6 +34,7 @@ static long sys_open(const char *p, long fl)              { return syscall3(SYS_
 static long sys_close(long fd)                             { return syscall3(SYS_close, fd, 0, 0); }
 static long sys_getdents(long fd, void *b, long n)         { return syscall3(SYS_getdents, fd, (long)b, n); }
 static long sys_ps(void *b, long n)                        { return syscall3(SYS_ps, (long)b, n, 0); }
+static long sys_diskread(long lba, long nsec, void *b)     { return syscall3(SYS_diskread, lba, nsec, (long)b); }
 static long sys_yield(void)                                { return syscall3(SYS_yield, 0, 0, 0); }
 static long sys_exit(long code)                            { return syscall3(SYS_exit, code, 0, 0); }
 
@@ -130,6 +132,34 @@ static void cmd_ps(void)
     }
 }
 
+static void cmd_diskread(const char *arg)
+{
+    /* arg = decimal LBA */
+    long lba = 0;
+    for (long i = 0; arg[i] >= '0' && arg[i] <= '9'; i++)
+        lba = lba * 10 + (arg[i] - '0');
+    static char buf[8 * 512];
+    long n = sys_diskread(lba, 8, buf);
+    char out[160];
+    long on = 0;
+    on = acpy(out, on, "disk: LBA ");
+    on = adec(out, on, lba);
+    if (n <= 0) {
+        on = acpy(out, on, " read FAILED\n");
+        sys_write(1, out, on);
+        return;
+    }
+    on = acpy(out, on, " read ");
+    on = adec(out, on, n);
+    on = acpy(out, on, " bytes, first 32: '");
+    for (long i = 0; i < 32 && i < n; i++) {
+        char ch = buf[i];
+        out[on++] = (ch >= 32 && ch < 127) ? ch : '.';
+    }
+    on = acpy(out, on, "'\n");
+    sys_write(1, out, on);
+}
+
 long main(void)
 {
     long tid = syscall3(SYS_gettid, 0, 0, 0);
@@ -169,7 +199,7 @@ exec:
 
         if (cmd[0] == 0) { /* empty */ }
         else if (eq(cmd, "help"))
-            puts("commands: help | ls | cat <file> | echo <text> | write <file> <text> | ps | exit\n");
+            puts("commands: help | ls | cat <file> | echo <text> | write <file> <text> | ps | diskread <lba> | exit\n");
         else if (eq(cmd, "ls")) cmd_ls();
         else if (eq(cmd, "cat")) cmd_cat(arg);
         else if (eq(cmd, "echo")) { sys_write(1, arg, slen(arg)); sys_write(1, "\n", 1); }
@@ -186,6 +216,7 @@ exec:
             cmd_write(path, text);
         }
         else if (eq(cmd, "ps")) cmd_ps();
+        else if (eq(cmd, "diskread")) cmd_diskread(arg);
         else if (eq(cmd, "exit")) { sys_exit(0); for (;;) sys_yield(); }
         else {
             on = 0;
