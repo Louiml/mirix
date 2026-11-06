@@ -19,6 +19,7 @@
 #define VN_CONSOLE 1
 #define VN_DIR     2
 #define VN_FILE    3
+#define VN_PTY     4   /* Phase 7b: master/slave pair sharing a pty_t */
 
 #define O_RDONLY 0
 #define O_WRONLY 1
@@ -40,5 +41,10 @@ long vfs_read(int vnode, uint32_t *offset, void *buf, long len);
 long vfs_write(int vnode, uint32_t *offset, const void *buf, long len);
 long vfs_getdents(int vnode, void *buf, long len);    /* dir only, bytes out */
 int  vfs_vnode_type(int vnode);
+
+/* Phase 7b: create a pty pair registered as /ptymN (master) and /ptysN
+ * (slave). Non-blocking: read returns 0 when the ring is empty.
+ * Returns the SLAVE vnode index, or -errno. */
+int  vfs_pty_create(void);
 
 #endif

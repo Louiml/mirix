@@ -22,7 +22,11 @@ typedef void (*thread_fn_t)(void);
 
 void sched_init(void);                       /* adopts the boot stack as "main" */
 int  thread_create(const char *name, thread_fn_t fn);            /* ring 0 */
-int  process_spawn_user(const char *name, const uint8_t *elf, size_t len); /* ring 3 */
+int  process_spawn_user(const char *name, const uint8_t *elf, size_t len);
+/* Phase 7b: like process_spawn_user, but fds 0/1/2 are bound to the given
+ * vnodes (e.g. the slave side of a pty) instead of the console. */
+int  process_spawn_user_fd(const char *name, const uint8_t *elf, size_t len,
+                           int fd0_vnode, int fd1_vnode); /* ring 3 */
 void sched_tick(registers_t *frame);         /* called from the timer IRQ */
 void sched_switch_from_irq(registers_t *frame);
 void sched_yield(void);                      /* cooperative reschedule (syscall) */

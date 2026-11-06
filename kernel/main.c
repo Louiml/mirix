@@ -91,7 +91,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 7a: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 7b: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -277,12 +277,21 @@ void _start(void)
             uart_printf("ahci: LBA 100 read %ld bytes, magic MISMATCH\n", n);
     }
 
-    /* Phase 5a: syscalls + per-process address spaces; 2 demo processes +
-     * the interactive shell (mirsh) reading the keyboard via read(0). */
+    /* Phase 5a/7b: syscalls + per-process address spaces; 2 demo processes +
+     * mirsh, now attached to the SLAVE side of a pty (the Aurora terminal
+     * window holds the master and bridges keyboard/display). */
     syscall_init();
     process_spawn_user("userA", hello_elf, hello_elf_len);
     process_spawn_user("userB", hello_elf, hello_elf_len);
-    process_spawn_user("shell", shell_elf, shell_elf_len);
+    int pty_slave = vfs_pty_create();
+    if (pty_slave >= 0)
+        process_spawn_user_fd("shell", shell_elf, shell_elf_len,
+                              pty_slave, pty_slave);
+    else
+        uart_printf("pty: create FAILED, falling back to console shell\n");
+    cli();   /* atomic: test greps these lines */
+    uart_printf("pty: shell on /ptys0, aurora will own /ptym0\n");
+    sti();
 
     /* Phase 7a: Aurora desktop. The compositor takes over the screen, so the
      * serial->fb mirror goes off (serial logging continues). */

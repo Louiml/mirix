@@ -121,12 +121,23 @@ int thread_create(const char *name, thread_fn_t fn)
 
 int process_spawn_user(const char *name, const uint8_t *elf, size_t len)
 {
+    return process_spawn_user_fd(name, elf, len, 0, 0);   /* console fds */
+}
+
+int process_spawn_user_fd(const char *name, const uint8_t *elf, size_t len,
+                          int fd0_vnode, int fd1_vnode)
+{
     cli();
     thread_t *t = alloc_slot(name);
     if (!t) {
         sti();
         return -1;
     }
+    /* bind fds 0/1/2 to the requested vnodes (alloc_slot's fds_init gave
+     * them the console); offsets start at 0 */
+    t->fds[0].vnode = fd0_vnode; t->fds[0].off = 0;
+    t->fds[1].vnode = fd1_vnode; t->fds[1].off = 0;
+    t->fds[2].vnode = fd1_vnode; t->fds[2].off = 0;
     t->is_user = 1;
     t->state = TH_READY;
 

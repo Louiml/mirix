@@ -8,6 +8,13 @@
  */
 #include <stdint.h>
 
+static void memset(void *p, int c, unsigned long n)
+{
+    unsigned char *d = (unsigned char *)p;
+    for (unsigned long i = 0; i < n; i++)
+        d[i] = (unsigned char)c;
+}
+
 static long syscall3(long nr, long a1, long a2, long a3)
 {
     long ret;
@@ -32,7 +39,11 @@ static long syscall6(long nr, long a1, long a2, long a3, long a4, long a5, long 
 
 #define SYS_write      0
 #define SYS_exit       1
+#define SYS_gettid     2
 #define SYS_yield      3
+#define SYS_open       4
+#define SYS_read       5
+#define SYS_close      6
 #define SYS_fbinfo    11
 #define SYS_getevent  12
 #define SYS_mousepos  13
@@ -53,8 +64,13 @@ static long syscall6(long nr, long a1, long a2, long a3, long a4, long a5, long 
 static long sys_write(long fd, const void *b, long n) { return syscall3(SYS_write, fd, (long)b, n); }
 static long sys_yield(void) { return syscall3(SYS_yield, 0, 0, 0); }
 static long sys_fbinfo(void *b) { return syscall3(SYS_fbinfo, (long)b, 0, 0); }
-/* mouse-only event stream (filter=1) so the shell keeps the keyboard */
-static long sys_getevent(void *b) { return syscall3(SYS_getevent, (long)b, 1, 0); }
+/* any event (filter=0: kbd first, then mouse) — aurora is the sole keyboard
+ * consumer now and forwards keystrokes into the pty master */
+static long sys_getevent(void *b) { return syscall3(SYS_getevent, (long)b, 0, 0); }
+static long sys_open(const char *p, long fl) { return syscall3(SYS_open, (long)p, fl, 0); }
+static long sys_read(long fd, void *b, long n) { return syscall3(SYS_read, fd, (long)b, n); }
+
+#define O_RDWR 2
 static long sys_mousepos(void *b) { return syscall3(SYS_mousepos, (long)b, 0, 0); }
 static long sys_win_create(int x, int y, int w, int h, const char *t, int fl)
 { return syscall6(SYS_win_create, x, y, w, h, (long)t, fl); }
@@ -295,6 +311,67 @@ static void draw_notes(awin_t *a)
     wtext(b, w, h, 12, 84, 1, 0x886655, "Aurora desktop, phase 7a");
 }
 
+/* ---------------- terminal window (Phase 7b) ---------------- */
+#define TCOLS 55
+#define TROWS 34
+static char tscreen[TROWS][TCOLS + 1];
+static int tcol, trow;
+static int term_dirty;
+
+static void term_scroll(void)
+{
+    for (int y = 0; y + 1 < TROWS; y++) {
+        for (int x = 0; x <= TCOLS; x++)
+            tscreen[y][x] = tscreen[y + 1][x];
+    }
+    for (int x = 0; x <= TCOLS; x++)
+        tscreen[TROWS - 1][x] = ' ';
+    tscreen[TROWS - 1][TCOLS] = 0;
+}
+
+static void term_putc(char c)
+{
+    if (c == '\n') {
+        tcol = 0;
+        if (++trow >= TROWS) { term_scroll(); trow = TROWS - 1; }
+        return;
+    }
+    if (c == '\r')
+        return;
+    if (c == '\b') {
+        if (tcol > 0) tcol--;
+        else if (trow > 0) { trow--; tcol = TCOLS - 1; }
+        tscreen[trow][tcol] = ' ';
+        return;
+    }
+    if (c < 32)
+        return;
+    tscreen[trow][tcol] = c;
+    if (++tcol >= TCOLS) {
+        tcol = 0;
+        if (++trow >= TROWS) { term_scroll(); trow = TROWS - 1; }
+    }
+    term_dirty = 1;
+}
+
+static void draw_term(awin_t *a)
+{
+    uint32_t *b = a->buf;
+    int w = a->w, h = a->h;
+    wrect(b, w, h, 0, 0, w, h, 0x101018);
+    for (int y = 0; y < TROWS; y++) {
+        int yy = y * 8 + 4;
+        if (yy + 8 > h) break;
+        char line[TCOLS + 1];
+        for (int x = 0; x < TCOLS; x++)
+            line[x] = tscreen[y][x] ? tscreen[y][x] : ' ';
+        line[TCOLS] = 0;
+        wtext(b, w, h, 4, yy, 1, 0xc8ffc8, line);
+    }
+    /* cursor block */
+    wrect(b, w, h, 4 + tcol * 8, trow * 8 + 4, 8, 8, 0x40d0ff);
+}
+
 /* ---------------- main loop ---------------- */
 
 long main(void)
@@ -306,10 +383,11 @@ long main(void)
 
     awin_t *about = add_win(120, 70, 380, 260, "About MirixOS", 0);
     awin_t *clock = add_win(560, 90, 240, 150, "Uptime", 0);
+    awin_t *term  = add_win(430, 160, 440, 300, "Terminal", 0);
     int dw = DOCK_ICONS * (44 + 14) - 14 + 24;
     int dh = 44 + 26;
     awin_t *dock = add_win((SW - dw) / 2, SH - dh - 12, dw, dh, "Dock", WM_FRAMELESS);
-    if (!about || !clock || !dock) {
+    if (!about || !clock || !term || !dock) {
         puts("aurora: FAILED to create windows\n");
         syscall3(SYS_exit, 1, 0, 0);
         return 1;
@@ -317,16 +395,34 @@ long main(void)
     draw_about(about);
     draw_uptime(clock);
     draw_dock(dock, -1, -1);
+    memset(tscreen, ' ', sizeof tscreen);
+    for (int y = 0; y < TROWS; y++)
+        tscreen[y][TCOLS] = 0;
+    tcol = 0; trow = 0;
+    draw_term(term);
     sys_win_commit(about->wid);
     sys_win_commit(clock->wid);
+    sys_win_commit(term->wid);
     sys_win_commit(dock->wid);
     sys_win_focus(about->wid);
+
+    /* Phase 7b: open the pty master — mirsh runs on the slave side. */
+    long mfd = sys_open("/ptym0", O_RDWR);
+    if (mfd < 0) {
+        puts("aurora: FAILED to open /ptym0\n");
+    } else {
+        char m[64]; long n = 0;
+        n = acpy(m, n, "aurora: pty link up (fd ");
+        n = adec(m, n, mfd);
+        n = acpy(m, n, ") — mirsh runs in the Terminal window\n");
+        sys_write(1, m, n);
+    }
 
     {
         char m[96]; long n = 0;
         n = acpy(m, n, "aurora: ready: ");
         n = adec(m, n, nwins);
-        n = acpy(m, n, " windows (About, Uptime, Dock) on ");
+        n = acpy(m, n, " windows (About, Uptime, Terminal, Dock) on ");
         n = adec(m, n, SW);
         m[n++] = 'x';
         n = adec(m, n, SH);
@@ -347,6 +443,26 @@ long main(void)
                 mx += ev.dx;
                 my += ev.dy;
                 btns = ev.buttons;
+            } else if (ev.type == 0 && ev.pressed && ev.ascii && mfd >= 0) {
+                /* forward the keystroke to the shell on the pty slave */
+                char c = ev.ascii;
+                sys_write(mfd, &c, 1);
+            }
+        }
+        /* drain shell output from the pty master: mirror to serial (so the
+         * headless test sees it) and render into the Terminal window */
+        if (mfd >= 0) {
+            char pb[256];
+            long pn;
+            while ((pn = sys_read(mfd, pb, (long)sizeof pb)) > 0) {
+                sys_write(1, pb, pn);
+                for (long i = 0; i < pn; i++)
+                    term_putc(pb[i]);
+            }
+            if (term_dirty && term && find_wid(term->wid)) {
+                term_dirty = 0;
+                draw_term(term);
+                sys_win_commit(term->wid);
             }
         }
         {
@@ -436,7 +552,10 @@ long main(void)
                             awin_t *nt = add_win(700, 300, 320, 200, "Notes", 0);
                             if (nt) { draw_notes(nt); sys_win_commit(nt->wid); sys_win_focus(nt->wid); }
                         } else if (i == 3) {
-                            puts("aurora: shell is on serial (mirix$)\n");
+                            if (term && find_wid(term->wid)) {
+                                sys_win_focus(term->wid);
+                                puts("aurora: dock launch 'Shell' -> Terminal window focused\n");
+                            }
                         }
                         break;
                     }

@@ -80,7 +80,7 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
             uart_write((const char *)buf, len);
             return len;
         }
-        if (vfs_vnode_type(vn) != VN_FILE)
+        if (vfs_vnode_type(vn) != VN_FILE && vfs_vnode_type(vn) != VN_PTY)
             return (uint64_t)-9;
         return (uint64_t)vfs_write(vn, proc_fd_offset((int)fd),
                                    (const void *)buf, (long)len);
@@ -100,7 +100,7 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
                     ((char *)buf)[n++] = ev.ascii;
             return (uint64_t)n;
         }
-        if (vfs_vnode_type(vn) != VN_FILE)
+        if (vfs_vnode_type(vn) != VN_FILE && vfs_vnode_type(vn) != VN_PTY)
             return (uint64_t)-9;
         return (uint64_t)vfs_read(vn, proc_fd_offset((int)fd), (void *)buf, (long)len);
     }

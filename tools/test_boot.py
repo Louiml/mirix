@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 7a: kernel entered"
+BANNER = "MirixOS phase 7b: kernel entered"
 
 HD = BUILD / "mirix.img"
 
@@ -280,10 +280,20 @@ def main() -> int:
     )
     ok_aurora = (
         "wm: compositor ready" in serial
-        and "aurora: ready: 3 windows" in serial
+        and "aurora: ready: 4 windows" in serial
         and "aurora: dock hover icon 2" in serial
         and "aurora: drag win" in serial
         and "aurora: closed win" in serial
+    )
+    # Phase 7b: pty bridge — mirsh on /ptys0, aurora on /ptym0; shell output
+    # must round-trip through the pty back to serial (via aurora's mirror).
+    ok_pty = (
+        "vfs: pty created /ptym0" in serial
+        and "pty: shell on /ptys0" in serial
+        and "aurora: pty link up" in serial
+        and "mirsh ready (pid" in serial
+        and "ls: 1 entries" in serial
+        and "disk: LBA 0 read 4096 bytes" in serial
     )
     ok_ahci = (
         "ahci: port 0 online" in serial
@@ -310,6 +320,7 @@ def main() -> int:
         and ok_fb6
         and ok_ttf
         and ok_aurora
+        and ok_pty
     )
 
     ok_screen = False
