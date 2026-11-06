@@ -60,6 +60,24 @@ xorriso, mtools, QEMU (`qemu-system-x86_64`), OVMF, GDB. On Kali/Debian:
 sudo apt install clang lld nasm make python3 xorriso mtools qemu-system-x86 ovmf gdb
 ```
 
+## Run the ISO in a virtual machine
+
+The bootable image is **`build/mirixos.iso`** (~5.7 MB, hybrid: boots via UEFI
+**and** legacy BIOS/El Torito — verified with OVMF and SeaBIOS on q35 and
+i440fx). On Windows that is `D:\mirixos\build\mirixos.iso`. Rebuild anytime with:
+
+```sh
+wsl -d kali-linux -- bash -c 'cd /mnt/d/mirixos && make iso'
+```
+
+- **QEMU**: `qemu-system-x86_64 -machine q35 -m 512M -smp 4 -cdrom build/mirixos.iso`
+  (add `-drive if=none,id=hd0,file=build/mirix.img,format=raw -device ide-hd,drive=hd0,bus=ide.0`
+  to attach the AHCI test disk; `make run` does UEFI+OVMF with a GUI window)
+- **VirtualBox / VMware**: create a new VM (OS type "Other/Unknown", 64-bit,
+  >= 512 MB RAM, >= 4 CPUs), attach `mirixos.iso` as the optical drive, boot.
+  Enable UEFI *or* leave BIOS — both work. The Aurora desktop comes up;
+  click the dock icons (About / Clock / Files / Terminal / Editor / Settings).
+
 ## Tests
 
 ```sh
