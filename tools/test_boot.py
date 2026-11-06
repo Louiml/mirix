@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 6a: kernel entered"
+BANNER = "MirixOS phase 6b: kernel entered"
 
 HD = BUILD / "mirix.img"
 
@@ -165,6 +165,16 @@ def main() -> int:
             # diskread 0 — the shell reads the AHCI disk via SYS_diskread
             send_keys(("d", "i", "s", "k", "r", "e", "a", "d", "spc", "0", "ret"))
             wait_for(("disk: LBA 0 read 4096 bytes, first 32: 'MIRIXAHCI0MirixOS AHCI",))
+            # Phase 6b: inject mouse movement + a click via the monitor
+            for mcmd in ("mouse_move 400 300", "mouse_move 700 400",
+                         "mouse_button 1", "mouse_button 0"):
+                s.sendall((mcmd + "\n").encode())
+                try:
+                    s.recv(4096)
+                except socket.timeout:
+                    pass
+                time.sleep(0.3)
+            wait_for(("[mouse] x=", "b=01"))
             s.sendall(f"screendump {SHOT_TMP}\n".encode())
             try:
                 s.recv(4096)
@@ -234,7 +244,9 @@ def main() -> int:
     )
     ok_fb6 = (
         "fb: double buffer ready (1280x720" in serial
-        and "lapic: timer started" in serial
+        and "ps2: mouse ready (IRQ12" in serial
+        and "[mouse] x=" in serial
+        and "b=01" in serial
     )
     ok_ahci = (
         "ahci: port 0 online" in serial

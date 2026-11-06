@@ -1,5 +1,6 @@
 #include "ps2.h"
 #include "drivers/pic.h"
+#include "drivers/fb.h"
 #include "lib/io.h"
 #include "lib/uart.h"
 
@@ -46,6 +47,99 @@ int kbd_pop(kbd_event_t *out)
     *out = g_ring[g_tail % KBD_RING];
     g_tail++;
     return 1;
+}
+
+/* ---- mouse: 3-byte packets on IRQ12, own ring + absolute position ---- */
+#define MOUSE_RING 128
+static mouse_event_t g_mring[MOUSE_RING];
+static volatile uint32_t g_mhead, g_mtail;
+static int g_mx, g_my;                 /* absolute cursor position */
+static uint8_t g_mbtn;
+
+static void mouse_push(const mouse_event_t *ev)
+{
+    uint32_t h = g_mhead;
+    g_mring[h % MOUSE_RING] = *ev;
+    g_mhead = h + 1;
+    if (g_mhead - g_mtail > MOUSE_RING)
+        g_mtail = g_mhead - MOUSE_RING;
+}
+
+int mouse_pop(mouse_event_t *out)
+{
+    if (g_mtail == g_mhead)
+        return 0;
+    *out = g_mring[g_mtail % MOUSE_RING];
+    g_mtail++;
+    return 1;
+}
+
+void mouse_get_pos(int *x, int *y, uint8_t *buttons)
+{
+    *x = g_mx;
+    *y = g_my;
+    *buttons = g_mbtn;
+}
+
+int input_pop(input_event_t *out)
+{
+    kbd_event_t k;
+    if (kbd_pop(&k)) {
+        out->type = 0;
+        out->code = k.code;
+        out->pressed = k.pressed;
+        out->extended = k.extended;
+        out->ascii = k.ascii;
+        out->dx = out->dy = 0;
+        out->buttons = 0;
+        return 1;
+    }
+    mouse_event_t m;
+    if (mouse_pop(&m)) {
+        out->type = 1;
+        out->code = out->pressed = out->extended = 0;
+        out->ascii = 0;
+        out->dx = m.dx;
+        out->dy = m.dy;
+        out->buttons = m.buttons;
+        return 1;
+    }
+    return 0;
+}
+
+void ps2_mouse_irq(void)
+{
+    /* AUX output buffer full (status bit 5) and data available (bit 0). */
+    if (!(inb(PS2_STATUS) & 0x21) || !(inb(PS2_STATUS) & 0x20))
+        return;
+    static uint8_t pkt[3];
+    static uint8_t idx = 0;
+    pkt[idx++] = inb(PS2_DATA);
+    if (idx < 3)
+        return;
+    idx = 0;
+
+    int16_t dx = (int16_t)pkt[1];
+    int16_t dy = (int16_t)pkt[2];
+    if (pkt[0] & 0x10) dx |= (int16_t)0xff00;   /* X sign bit (9-bit) */
+    if (pkt[0] & 0x20) dy |= (int16_t)0xff00;   /* Y sign bit */
+    uint8_t buttons = pkt[0] & 0x07;
+
+    /* PS/2 Y axis is inverted vs screen coordinates. */
+    mouse_event_t ev = { dx, (int16_t)-dy, buttons };
+    mouse_push(&ev);
+
+    g_mbtn = buttons;
+    if (fb_ready()) {
+        int nx = g_mx + dx, ny = g_my - dy;
+        if (nx < 0) nx = 0;
+        if (ny < 0) ny = 0;
+        if (nx >= (int)fb_width())  nx = (int)fb_width() - 1;
+        if (ny >= (int)fb_height()) ny = (int)fb_height() - 1;
+        g_mx = nx;
+        g_my = ny;
+        fb_set_cursor(g_mx, g_my, 1);
+    }
 }
 
 /* ---- scancode set 1 -> ASCII (with shift variants) ---- */
@@ -142,4 +236,24 @@ void ps2_init(void)
     pic_clear_mask(1);                  /* unmask IRQ1 in the PIC */
     uart_printf("ps2: keyboard ready (IRQ1, scancode set 1, cfg=%02x ack=%02x bat=%02x)\n",
                 cfg, ack, bat);
+
+    /* ---- mouse on the aux port (IRQ12) ---- */
+    cmd(0xa8);                          /* enable mouse port */
+    cmd(0x20);                          /* read config again */
+    cfg = data_r();
+    cfg |= 0x02;                        /* IRQ12 enable */
+    cfg &= ~0x20;                       /* mouse clock enabled */
+    cmd(0x60);
+    data_w(cfg);
+    cmd(0xd4); data_w(0xf4); (void)data_r();   /* enable data reporting, ack */
+    cmd(0xd4); data_w(0xf3); data_w(100);      /* sample rate 100/s */
+    (void)data_r(); (void)data_r();
+    if (fb_ready()) {
+        g_mx = (int)fb_width() / 2;
+        g_my = (int)fb_height() / 2;
+        fb_set_cursor(g_mx, g_my, 1);
+    }
+    pic_clear_mask(2);                  /* unmask the cascade on the master */
+    pic_clear_mask(12);                 /* unmask IRQ12 (slave PIC) */
+    uart_printf("ps2: mouse ready (IRQ12, 3-byte packets, reporting on, cfg=%02x)\n", cfg);
 }

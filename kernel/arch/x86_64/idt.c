@@ -82,6 +82,11 @@ void irq_handler(registers_t *regs)
         pic_eoi((uint8_t)v);
         return;
     }
+    if (v == IRQ_BASE + 12) { /* PS/2 mouse */
+        ps2_mouse_irq();
+        pic_eoi((uint8_t)v);
+        return;
+    }
     if (v >= 32 + 16) {
         /* Other local APIC LVT interrupt: EOI to the LAPIC */
         lapic_eoi();

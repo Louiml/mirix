@@ -163,6 +163,29 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
         out[2] = 32;
         return 0;
     }
+    case SYS_getevent: {
+        uint64_t buf = a1;
+        if (!is_user_addr(buf) || !is_user_addr(buf + sizeof(input_event_t)))
+            return (uint64_t)-2;
+        input_event_t ev;
+        if (!input_pop(&ev))
+            return 0;                       /* no event pending */
+        memcpy((void *)buf, &ev, sizeof(ev));
+        return 1;
+    }
+    case SYS_mousepos: {
+        uint64_t buf = a1;
+        if (!is_user_addr(buf) || !is_user_addr(buf + 12))
+            return (uint64_t)-2;
+        int x, y;
+        uint8_t b;
+        mouse_get_pos(&x, &y, &b);
+        uint32_t *out = (uint32_t *)buf;
+        out[0] = (uint32_t)x;
+        out[1] = (uint32_t)y;
+        out[2] = b;
+        return 0;
+    }
     case SYS_gettid:
         return (uint64_t)current_thread_id();
     case SYS_yield:

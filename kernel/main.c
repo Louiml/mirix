@@ -87,7 +87,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 6a: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 6b: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -268,7 +268,24 @@ void _start(void)
     int alive_n = 0;
     for (;;) {
         msleep(20);
-        fb_present();   /* Phase 6a: back -> front (~50 Hz) */
+        fb_present();   /* Phase 6a/6b: back -> front + cursor (~50 Hz) */
+        /* mouse events: echo position for the headless test (QEMU monitor
+         * `mouse_move`/`mouse_button` inject them) */
+        mouse_event_t mev;
+        int mmoved = 0;
+        while (mouse_pop(&mev)) {
+            mmoved = 1;
+            if (mev.buttons != 0 || mev.dx || mev.dy)
+                ;   /* position already tracked in the IRQ handler */
+        }
+        if (mmoved) {
+            int mx, my;
+            uint8_t mb;
+            mouse_get_pos(&mx, &my, &mb);
+            cli();
+            uart_printf("[mouse] x=%d y=%d b=%02x\n", mx, my, mb);
+            sti();
+        }
         /* keyboard events are consumed by the shell via read(0) */
         if (++alive_n % 25 == 0)   /* every ~500 ms */
             uart_printf("[main] alive: %llu switches, %llu ticks\n",
