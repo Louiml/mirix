@@ -100,8 +100,36 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         printed with IF=0 (a timer preemption used to split it mid-line).
         Screendump now 94k bright pixels / 9 distinct colors. test-boot +
         test-crash PASS.
-- [ ] **Phase 6: Graphics stack** — framebuffer driver, double buffering,
-      TrueType rendering, input event queue, cursor.
+- [x] **Phase 6: Graphics stack**
+  - [x] **6a** — double buffering: all drawing goes to a heap-allocated back
+        buffer (`fb_enable_double_buffer()` after heap init), the main loop
+        calls `fb_present()` ~50 Hz (back→front copy + dirty flag); panic
+        paths call `fb_present()` too so the red crash screen still shows
+        (97.4% red verified). New syscalls `SYS_flip(10)`, `SYS_fbinfo(11)`.
+        Cursor compositing hook (`fb_set_cursor`/`fb_draw_cursor`) added.
+        test-boot + test-crash PASS.
+  - [x] **6b** — PS/2 mouse on IRQ12: aux port enabled (0xA8, cfg bit1,
+        sample rate 100/s, data reporting 0xF4), 3-byte packets decoded with
+        9-bit sign-extended X/Y deltas, own event ring + absolute position;
+        **master PIC cascade IRQ2 must be unmasked or slave IRQs never fire**.
+        Unified `input_event_t` queue + `SYS_getevent(12)`/`SYS_mousepos(13)`.
+        12x19 arrow cursor composited onto the FRONT buffer in `fb_present()`
+        (never into the back buffer; `fb_set_cursor` sets `g_dirty` so the
+        old position erases). test_boot.py injects `mouse_move`/`mouse_button`
+        via the QEMU monitor — serial shows `[mouse] x=1279 y=719 b=01`.
+        test-boot + test-crash PASS.
+  - [x] **6c** — TrueType renderer (`kernel/lib/ttf.c`): sfnt parser
+        (big-endian!), cmap format 4 lookup, simple + composite glyf outlines,
+        quadratic bezier flattening (16 samples, int64 De Casteljau), all
+        math in 16.16 fixed point (kernel is -mno-sse, no FPU), nonzero-
+        winding scanline fill with 4x horizontal subsampling → 8-bit alpha
+        bitmaps, 192-entry LRU glyph cache keyed (codepoint, px). DejaVuSans
+        (757 KB, OFL, `assets/fonts/LICENSE-DejaVu.txt`) embedded via
+        `tools/elf2h.py` → `build/DejaVuSans_ttf.h`. `fb_getpixel`/
+        `fb_blendpixel` (src-over) added to fb.c. Boot draws demo strings;
+        serial: `ttf: loaded DejaVuSans upm=2048 glyphs=6253`,
+        `width at 48px = 424 px`; screendump shows antialiased 48 px
+        "MirixOS" glyphs. test-boot + test-crash PASS.
 - [ ] **Phase 7: Aurora desktop** — window server + compositor (alpha,
       rounded corners, shadows, blur), menu bar, Dock with magnification,
       WM (drag/resize/min/max, traffic lights), C++ widget toolkit, apps:

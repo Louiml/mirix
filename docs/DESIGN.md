@@ -259,6 +259,38 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
   PS/2 keyboard even with `-display none`; `tools/test_boot.py` sends
   `h i spc ret` and greps the serial for the `[kbd]` echo lines.
 
+## Graphics stack (Phase 6, done)
+
+- **6a double buffering:** `fb_enable_double_buffer()` (after heap init)
+  allocates a back buffer; every draw op writes `g_draw` (back buffer when
+  present) and sets `g_dirty`. `fb_present()` memcpy's back→front when dirty;
+  the main loop calls it every 20 ms (~50 Hz) and both panic paths call it
+  once (so the red screen still appears — crash test 97.4% red).
+  `SYS_flip(10)` lets userland request a present; `SYS_fbinfo(11)` returns
+  (w, h, 32).
+- **6b mouse:** IRQ12 (vector 0x2c) → `ps2_mouse_irq()`. The i8042 aux port
+  is enabled (0xA8, config bit 1 = IRQ12, 0xF4 reporting, 100 Hz sample
+  rate). Packets are 3 bytes; X/Y are 9-bit two's complement (sign-extend
+  from bits 4/5 of byte 0). Position is accumulated absolutely, clamped to
+  the screen, and the arrow is composited onto the FRONT buffer inside
+  `fb_present()` — never into the back buffer, and `fb_set_cursor` marks
+  `g_dirty` so a moved cursor erases its old pixels. IRQ2 (cascade) must be
+  unmasked on the master PIC. `SYS_getevent(12)` pops a unified
+  `input_event_t` (kbd or mouse); `SYS_mousepos(13)` returns x/y/buttons.
+- **6c TrueType (`kernel/lib/ttf.c`):** sfnt tables are BIG-endian (an early
+  little-endian reader silently failed every check). cmap format 4 binary
+  search; loca short/long per `indexToLocFormat`; simple glyphs (flags with
+  repeat runs, delta-encoded coords) and composite glyphs (2.14 affine
+  transforms composed recursively). Outlines are flattened in device space
+  (y flipped), quadratic curves sampled 16x with int64 De Casteljau, then a
+  nonzero-winding scanline fill at 4x horizontal subsampling produces an
+  8-bit alpha bitmap per glyph, cached in a 192-entry LRU keyed
+  (codepoint, px). `ttf_draw_text` blends via `fb_blendpixel` (src-over) at
+  baseline = y + ascender*px/upm. Scale factor S = px*65536/upm, so
+  device16 = font_units * S (the <<16 lives inside S). Font: DejaVuSans.ttf
+  embedded as a C array (`build/DejaVuSans_ttf.h`), OFL license in
+  `assets/fonts/`.
+
 ## Driver list
 
 | Device | Driver | Phase |
@@ -266,10 +298,12 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | Serial UART 16550 (debug) | `kernel/lib/uart.c` | 0 (done) |
 | Framebuffer console | `kernel/drivers/fb.c` | 1 |
 | APIC/HPET timer | `kernel/drivers/timer.c` | 2 |
-| PS/2 keyboard/mouse | `kernel/drivers/ps2.c` | 4a (done) |
+| PS/2 keyboard/mouse | `kernel/drivers/ps2.c` | 4a/6b (done) |
 | PCI enumeration | `kernel/drivers/pci.c` | 4a (done) |
 | VFS + ramdisk | `kernel/fs/vfs.c` | 4b (done) |
 | AHCI SATA disk | `kernel/drivers/ahci.c` | 4c (done) |
+| Double-buffered fb + cursor | `kernel/drivers/fb.c` | 6a/6b (done) |
+| TrueType renderer | `kernel/lib/ttf.c` | 6c (done) |
 | Framebuffer TTY (serial mirror) | `kernel/drivers/fb.c`, `lib/uart.c` | 5b (done) |
 | mirsh shell | `user/shell.c` | 5a (done) |
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |
