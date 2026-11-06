@@ -8,5 +8,11 @@ SECTIONS
     .text   : { *(.text*) }
     .rodata : { *(.rodata*) }
     .data   : { *(.data*) }
+    /* C++ global constructors (harmless for C-only programs: empty) */
+    .init_array : {
+        __init_array_start = .;
+        *(.init_array*)
+        __init_array_end = .;
+    }
     .bss    : { *(.bss*) *(COMMON) }
 }

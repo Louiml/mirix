@@ -34,8 +34,12 @@
 #define SYS_net_recv   23  /* (buf, maxlen) -> bytes (0 = none) */
 
 void syscall_init(void);
-/* SMP (8c): STAR/LSTAR/SFMASK/EFER.SCE are PER-CPU MSRs — every AP must run
- * this too (ap_entry calls it), not just the BSP's syscall_init(). */
+/* SMP (8c): STAR/LSTAR/SFMASK/EFER.SCE are PER-CPU MSRs — every CPU must run
+ * this exactly once on ITSELF: APs in ap_entry(), the boot vCPU in
+ * smp_bsp_init() (before the APs are released, so kmain is still on it —
+ * calling it from kmain's syscall_init() later is racy, since the scheduler
+ * may have migrated kmain to an AP, leaving the boot vCPU without SCE and
+ * the first user syscall there #UDs). */
 void syscall_init_cpu(void);
 
 /* Called from syscall.asm. Args arrive in SysV order. Returns rax value. */

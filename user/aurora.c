@@ -119,6 +119,9 @@ static void log2(const char *a, long v)
 /* ---------------- 8x8 font (public domain, assets/fonts) -------- */
 #include "assets/fonts/font8x8_basic.h"
 
+/* Phase 7d: C++ apps (mixtk toolkit) linked into this binary */
+#include "apps.h"
+
 /* ---------------- drawing onto a window buffer ---------------- */
 static void wpx(uint32_t *buf, int w, int x, int y, uint32_t c)
 {
@@ -190,6 +193,19 @@ static awin_t *find_wid(int wid)
     return 0;
 }
 
+/* Phase 7d: live options driven by the Settings app (user/settings.cpp) */
+static int g_clock_seconds = 1;
+static int g_term_dark = 1;
+static int g_dock_mag = 1;
+void aurora_set_clock_seconds(int on) { g_clock_seconds = on; }
+void aurora_set_term_dark(int on) { g_term_dark = on ? 1 : 0; }
+void aurora_set_dock_magnify(int on) { g_dock_mag = on ? 1 : 0; }
+
+/* Phase 7d app windows (owned by this shell, painted by the C++ apps) */
+static awin_t *editor_win;
+static awin_t *settings_win;
+static int kbd_editor;      /* 1 = keystrokes go to the Editor, else to the pty */
+
 static awin_t *add_win(int x, int y, int w, int h, const char *title, int fl)
 {
     for (int i = 0; i < MAXW; i++) {
@@ -214,6 +230,9 @@ static void del_win(int wid)
         if (wins[i].used && wins[i].wid == wid) {
             wins[i].used = 0;
             nwins--;
+            /* Phase 7d: detach the C++ app driving this window */
+            if (editor_win && editor_win->wid == wid) { editor_detach(); editor_win = 0; kbd_editor = 0; }
+            if (settings_win && settings_win->wid == wid) { settings_detach(); settings_win = 0; }
             sys_win_close(wid);
             return;
         }
@@ -252,22 +271,27 @@ static void draw_uptime(awin_t *a)
     long n = 0;
     n = acpy(line, n, "uptime: ");
     n = adec(line, n, ms / 1000);
-    n = acpy(line, n, ".");
-    long frac = (ms / 100) % 10;
-    line[n++] = (char)('0' + frac);
+    if (g_clock_seconds) {
+        n = acpy(line, n, ".");
+        long frac = (ms / 100) % 10;
+        line[n++] = (char)('0' + frac);
+    }
     line[n++] = 's';
     line[n] = 0;
     wtext(b, w, h, 14, 16, 2, 0x66ffcc, "Clock");
     wtext(b, w, h, 14, 48, 2, 0xffffff, line);
-    wtext(b, w, h, 14, 80, 1, 0x8899aa, "ticks at 100 Hz");
+    if (g_clock_seconds)
+        wtext(b, w, h, 14, 80, 1, 0x8899aa, "ticks at 100 Hz");
+    else
+        wtext(b, w, h, 14, 80, 1, 0x8899aa, "seconds hidden (Settings)");
     /* little progress bar */
     wrect(b, w, h, 14, h - 30, w - 28, 8, 0x333344);
     wrect(b, w, h, 14, h - 30, (w - 28) * (int)(ms % 5000) / 5000, 8, 0x40d0ff);
 }
 
-#define DOCK_ICONS 4
-static const char *dock_names[DOCK_ICONS] = { "About", "Clock", "Files", "Terminal" };
-static const uint32_t dock_cols[DOCK_ICONS] = { 0x30ffa0, 0x40d0ff, 0xb060ff, 0xff9f40 };
+#define DOCK_ICONS 6
+static const char *dock_names[DOCK_ICONS] = { "About", "Clock", "Files", "Terminal", "Editor", "Settings" };
+static const uint32_t dock_cols[DOCK_ICONS] = { 0x30ffa0, 0x40d0ff, 0xb060ff, 0xff9f40, 0x70e0ff, 0xf0f060 };
 
 static void draw_dock(awin_t *d, int mx, int hover_icon)
 {
@@ -283,7 +307,7 @@ static void draw_dock(awin_t *d, int mx, int hover_icon)
         int icx = x0 + i * (base + gap) + base / 2;
         int size = base;
         int scale_pct = 100;
-        if (mx >= 0 && hover_icon == i) {
+        if (g_dock_mag && mx >= 0 && hover_icon == i) {
             /* magnification falls off with distance to the icon center */
             int dx = mx - icx;
             if (dx < 0) dx = -dx;
@@ -494,7 +518,9 @@ static void draw_term(awin_t *a)
 {
     uint32_t *b = a->buf;
     int w = a->w, h = a->h;
-    wrect(b, w, h, 0, 0, w, h, 0x101018);
+    uint32_t bg = g_term_dark ? 0x101018 : 0xf4f4f0;
+    uint32_t fg = g_term_dark ? 0xc8ffc8 : 0x1a5a2a;
+    wrect(b, w, h, 0, 0, w, h, bg);
     for (int y = 0; y < TROWS; y++) {
         int yy = y * 8 + 4;
         if (yy + 8 > h) break;
@@ -502,7 +528,7 @@ static void draw_term(awin_t *a)
         for (int x = 0; x < TCOLS; x++)
             line[x] = tscreen[y][x] ? tscreen[y][x] : ' ';
         line[TCOLS] = 0;
-        wtext(b, w, h, 4, yy, 1, 0xc8ffc8, line);
+        wtext(b, w, h, 4, yy, 1, fg, line);
     }
     /* cursor block */
     wrect(b, w, h, 4 + tcol * 8, trow * 8 + 4, 8, 8, 0x40d0ff);
@@ -579,10 +605,16 @@ long main(void)
                 mx += ev.dx;
                 my += ev.dy;
                 btns = ev.buttons;
-            } else if (ev.type == 0 && ev.pressed && ev.ascii && mfd >= 0) {
-                /* forward the keystroke to the shell on the pty slave */
+            } else if (ev.type == 0 && ev.pressed && ev.ascii) {
                 char c = ev.ascii;
-                sys_write(mfd, &c, 1);
+                /* Phase 7d: the Editor window owns the keyboard while focused */
+                if (kbd_editor && editor_win && find_wid(editor_win->wid)) {
+                    if (editor_key(c))
+                        editor_paint();
+                } else if (mfd >= 0) {
+                    /* forward the keystroke to the shell on the pty slave */
+                    sys_write(mfd, &c, 1);
+                }
             }
         }
         /* drain shell output from the pty master: mirror to serial (so the
@@ -656,10 +688,12 @@ long main(void)
                         n = adec(m, n, wid);
                         n = acpy(m, n, " to 640x480\n");
                         sys_write(1, m, n);
-                        if (hit->title[0] == 'U') draw_uptime(hit);
-                        else if (hit->title[0] == 'A') draw_about(hit);
-                        else if (hit->title[0] == 'F') { files_refresh(); draw_files(hit); }
-                        else if (hit->title[0] == 'T') draw_term(hit);
+                        if (eqs(hit->title, "Uptime")) draw_uptime(hit);
+                        else if (eqs(hit->title, "About MirixOS")) draw_about(hit);
+                        else if (eqs(hit->title, "Files")) { files_refresh(); draw_files(hit); }
+                        else if (eqs(hit->title, "Terminal")) draw_term(hit);
+                        else if (hit == editor_win) editor_attach(wid, hit->buf, hit->x, hit->y, 640, 480);
+                        else if (hit == settings_win) settings_attach(wid, hit->buf, hit->x, hit->y, 640, 480);
                         sys_win_commit(wid);
                     } else {
                         drag_wid = wid;
@@ -669,14 +703,23 @@ long main(void)
                     }
                 } else {
                     sys_win_focus(wid);
-                    /* Files window: click a row to open the file / disk */
-                    awin_t *fw = find_title("Files");
-                    if (hit == fw) {
-                        int row = (ly - WM_TITLE_H - FILES_HDR) / FILES_ROWH;
-                        if (row >= 0 && row <= nfents) {
-                            files_open_row(row);
-                            draw_files(hit);
-                            sys_win_commit(hit->wid);
+                    /* Phase 7d: the Editor window takes the keyboard when clicked */
+                    if (hit == editor_win) {
+                        kbd_editor = 1;
+                        editor_click(lx, ly);
+                    } else {
+                        if (hit == term) kbd_editor = 0;
+                        /* Files window: click a row to open the file / disk */
+                        awin_t *fw = find_title("Files");
+                        if (hit == fw) {
+                            int row = (ly - WM_TITLE_H - FILES_HDR) / FILES_ROWH;
+                            if (row >= 0 && row <= nfents) {
+                                files_open_row(row);
+                                draw_files(hit);
+                                sys_win_commit(hit->wid);
+                            }
+                        } else if (hit == settings_win) {
+                            settings_click(lx, ly);
                         }
                     }
                 }
@@ -716,7 +759,38 @@ long main(void)
                         } else if (i == 3) {
                             if (term && find_wid(term->wid)) {
                                 sys_win_focus(term->wid);
+                                kbd_editor = 0;
                                 puts("aurora: dock launch 'Terminal'\n");
+                            }
+                        } else if (i == 4) {
+                            /* Phase 7d: Text Editor (C++ mixtk app) */
+                            if (editor_win && find_wid(editor_win->wid)) {
+                                sys_win_focus(editor_win->wid);
+                                kbd_editor = 1;
+                                puts("aurora: dock launch 'Editor' (already open, focused)\n");
+                            } else {
+                                editor_win = add_win(200, 120, 520, 340, "Editor", 0);
+                                if (editor_win) {
+                                    kbd_editor = 1;
+                                    editor_attach(editor_win->wid, editor_win->buf,
+                                                  editor_win->x, editor_win->y,
+                                                  editor_win->w, editor_win->h);
+                                    sys_win_focus(editor_win->wid);
+                                }
+                            }
+                        } else if (i == 5) {
+                            /* Phase 7d: System Settings (C++ mixtk app) */
+                            if (settings_win && find_wid(settings_win->wid)) {
+                                sys_win_focus(settings_win->wid);
+                                puts("aurora: dock launch 'Settings' (already open, focused)\n");
+                            } else {
+                                settings_win = add_win(740, 140, 320, 240, "Settings", 0);
+                                if (settings_win) {
+                                    settings_attach(settings_win->wid, settings_win->buf,
+                                                    settings_win->x, settings_win->y,
+                                                    settings_win->w, settings_win->h);
+                                    sys_win_focus(settings_win->wid);
+                                }
                             }
                         }
                         break;
@@ -785,6 +859,12 @@ long main(void)
             draw_uptime(clock);
             sys_win_commit(clock->wid);
         }
+
+        /* Phase 7d: repaint C++ app windows when their state changed */
+        if (editor_win && find_wid(editor_win->wid) && editor_dirty())
+            editor_paint();
+        if (settings_win && find_wid(settings_win->wid) && settings_dirty())
+            settings_paint();
 
         sys_yield();
     }

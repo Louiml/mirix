@@ -44,6 +44,15 @@ void smp_bsp_init(struct limine_mp_request *req)
     g_percpu[0].cpu = 0;
     g_percpu[0].online = 1;
     g_cpus_online = 1;
+    /* CRITICAL (8c/7d fix): set the SYSCALL MSRs (EFER.SCE/STAR/LSTAR/SFMASK)
+     * HERE, on the boot vCPU, BEFORE releasing the APs. smp_bsp_init() runs
+     * before any AP timer exists, so the main thread is guaranteed to still
+     * be on the boot vCPU — calling syscall_init_cpu() later from kmain
+     * (syscall_init) is racy: by then the scheduler may have migrated main
+     * to an AP, leaving the boot vCPU (apicid 0) without SCE, and the first
+     * user `syscall`/`sysretq` on it #UDs (observed sporadically). APs set
+     * their own in ap_entry(). */
+    syscall_init_cpu();
 
     if (!req || !req->response) {
         uart_printf("smp: no Limine MP response, running single-CPU\n");

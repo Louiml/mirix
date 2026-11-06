@@ -8,5 +8,11 @@ SECTIONS
     .text   : { *(.text*) }
     .rodata : { *(.rodata*) }
     .data   : { *(.data*) }
+    /* Phase 7d: C++ global constructors (aurora links mixtk/editor/settings) */
+    .init_array : {
+        __init_array_start = .;
+        *(.init_array*)
+        __init_array_end = .;
+    }
     .bss    : { *(.bss*) *(COMMON) }
 }

@@ -189,12 +189,14 @@ def main() -> int:
             mcmd("mouse_move -250 -170")        # -> back to (640,360)
             wait_for(("[mouse] x=", "b=01"))
 
-            # Phase 7a: drive the Aurora desktop (all targets in-bounds)
-            wait_for(("aurora: ready: 3 windows",))
-            mcmd("mouse_move 60 310")           # -> (700,670): dock icon 2
+            # Phase 7a: drive the Aurora desktop (all targets in-bounds).
+            # Dock geometry (DOCK_ICONS=6, SW=1280): dock at (461,638) 358x70;
+            # icon i screen center = 495 + i*58, y=670 (hover range +-70 overlaps
+            # neighbours, so icon 2 is clicked at x=651 to win the hit-test).
+            wait_for(("aurora: ready: 4 windows",))
+            mcmd("mouse_move 11 310")           # -> (651,670): dock icon 2
             wait_for(("aurora: dock hover icon 2",))
-            mcmd("mouse_move -200 -300")        # -> (500,370)
-            mcmd("mouse_move -190 -286")        # -> (310,84): About title bar
+            mcmd("mouse_move -341 -586")        # -> (310,84): About title bar
             mcmd("mouse_button 1")
             mcmd("mouse_move 90 116")           # -> (400,200): drag by +90,+116
             mcmd("mouse_button 0")
@@ -205,11 +207,11 @@ def main() -> int:
             wait_for(("aurora: closed win",))
 
             # Phase 7c: Files (Navigator) over VFS + AHCI
-            mcmd("mouse_move 95 566")           # -> (669,670): dock icon 2 (Files)
+            mcmd("mouse_move 77 566")           # -> (651,670): dock icon 2 (Files)
             mcmd("mouse_button 1")
             mcmd("mouse_button 0")
             wait_for(("aurora: dock launch 'Files'", "aurora: files: 1 entries in /"))
-            mcmd("mouse_move 31 -412")          # -> (700,258): hello.txt row
+            mcmd("mouse_move 49 -412")          # -> (700,258): hello.txt row
             mcmd("mouse_button 1")
             mcmd("mouse_button 0")
             wait_for(("aurora: files: read 'hello.txt' (16 bytes)",))
@@ -218,6 +220,31 @@ def main() -> int:
             mcmd("mouse_button 0")
             wait_for(("aurora: files: ahci LBA 0 read 4096 bytes, magic 'MIRIXAHCI0'",))
             mcmd("mouse_move -60 90")           # -> back to (640,360)
+
+            # Phase 7d: Text Editor (dock icon 4) — C++ mixtk app; click its
+            # window to focus it (keyboard routing), type "hi"+Enter, autosave.
+            mcmd("mouse_move 87 310")           # -> (727,670): dock icon 4 'Editor'
+            mcmd("mouse_button 1")
+            mcmd("mouse_button 0")
+            wait_for(("aurora: dock launch 'Editor'", "aurora: editor: open"))
+            mcmd("mouse_move -327 -370")        # -> (400,300): Editor window content
+            mcmd("mouse_button 1")
+            mcmd("mouse_button 0")
+            wait_for(("aurora: editor: click",))
+            send_keys(("h", "i", "ret"))
+            wait_for(("aurora: editor: line 'hi'", "aurora: editor: saved /notes.txt"))
+
+            # Phase 7d: Settings (dock icon 5) — click the first toggle row
+            mcmd("mouse_move 385 370")          # (400,300) -> (785,670): dock icon 5
+            mcmd("mouse_button 1")
+            mcmd("mouse_button 0")
+            wait_for(("aurora: dock launch 'Settings'", "aurora: settings: open"))
+            mcmd("mouse_move 5 -460")           # -> (790,210): 'Clock shows seconds' row
+            mcmd("mouse_button 1")
+            mcmd("mouse_button 0")
+            wait_for(("aurora: settings: 'clock seconds' -> off",
+                      "aurora: settings: saved /settings.cfg"))
+            mcmd("mouse_move -150 150")         # -> back to (640,360)
             time.sleep(0.5)
             s.sendall(f"screendump {SHOT_TMP}\n".encode())
             try:
@@ -343,6 +370,19 @@ def main() -> int:
         "smp: Limine reports 4 cpus" in serial
         and "smp: 4 cpus online" in serial
     )
+    # Phase 7d: C++ mixtk apps — Editor (type+autosave /notes.txt) and
+    # Settings (toggle + persist /settings.cfg), launched from the Dock
+    ok_7d = (
+        "aurora: dock launch 'Editor'" in serial
+        and "aurora: editor: open" in serial
+        and "aurora: editor: click" in serial
+        and "aurora: editor: line 'hi'" in serial
+        and "aurora: editor: saved /notes.txt" in serial
+        and "aurora: dock launch 'Settings'" in serial
+        and "aurora: settings: open" in serial
+        and "aurora: settings: 'clock seconds' -> off" in serial
+        and "aurora: settings: saved /settings.cfg" in serial
+    )
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -367,6 +407,7 @@ def main() -> int:
         and ok_net
         and ok_acpi
         and ok_smp
+        and ok_7d
     )
 
     ok_screen = False

@@ -62,7 +62,13 @@ void syscall_init_cpu(void)
 
 void syscall_init(void)
 {
-    syscall_init_cpu();   /* BSP */
+    /* The boot vCPU's MSRs were already set by smp_bsp_init() (which runs
+     * before the APs are released, so it is guaranteed to run on the boot
+     * vCPU). This call is idempotent and just re-affirms them on whichever
+     * vCPU kmain happens to be running on by now (the scheduler may have
+     * migrated it to an AP — that is exactly why the BSP init must NOT
+     * happen here). */
+    syscall_init_cpu();
     uart_printf("syscall: STAR=%llx LSTAR=%p SFMASK=0x200\n",
                 (unsigned long long)rdmsr(MSR_STAR), (void *)(uint64_t)syscall_entry);
 }

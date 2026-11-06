@@ -23,8 +23,24 @@ USER_CFLAGS := --target=x86_64-unknown-none \
               -mno-mmx -mno-sse -mno-sse2 \
               -O2 -g -Wall -Wextra -std=c17 \
               -I. -Iuser
+# Phase 7d: freestanding C++ (mixtk toolkit + apps linked into aurora).
+# No exceptions/RTTI/unwind tables; start.asm runs .init_array; mixtk.cpp
+# provides the mem* shims clang may emit.
+CXX         := clang++
+USER_CXXFLAGS := --target=x86_64-unknown-none \
+              -ffreestanding -fno-exceptions -fno-rtti -fno-threadsafe-statics \
+              -fno-use-cxa-atexit -fno-asynchronous-unwind-tables \
+              -fno-stack-protector -fno-stack-check \
+              -fno-pic -fno-pie -mno-red-zone \
+              -mno-mmx -mno-sse -mno-sse2 \
+              -O2 -g -Wall -Wextra -std=c++17 -Wno-c++11-narrowing \
+              -I. -Iuser
 USER_PROGS  := hello shell aurora
 USER_HDRS   := $(patsubst %,$(BUILD)/%_elf.h,$(USER_PROGS))
+# C++ modules linked into the aurora binary (Phase 7d apps)
+AURORA_CXX  := mixtk editor settings
+AURORA_OBJS := $(BUILD)/obj-user/aurora.o \
+               $(patsubst %,$(BUILD)/obj-user/%.cxx.o,$(AURORA_CXX))
 
 # Embedded TrueType font (Phase 6c): assets/fonts/DejaVuSans.ttf -> C array.
 FONT_HDR    := $(BUILD)/DejaVuSans_ttf.h
@@ -75,6 +91,16 @@ $(BUILD)/obj-user/start.o: user/start.asm
 $(BUILD)/obj-user/%.o: user/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(BUILD)/obj-user/%.cxx.o: user/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(USER_CXXFLAGS) -c $< -o $@
+
+# aurora = C shell + C++ app modules (Phase 7d) — explicit rule beats the
+# pattern rule below.
+$(BUILD)/aurora.elf: $(BUILD)/obj-user/start.o $(AURORA_OBJS) user/aurora.ld
+	@mkdir -p $(BUILD)
+	ld.lld -T user/aurora.ld -nostdlib -static -o $@ $(BUILD)/obj-user/start.o $(AURORA_OBJS)
 
 $(BUILD)/%.elf: $(BUILD)/obj-user/start.o $(BUILD)/obj-user/%.o user/%.ld
 	@mkdir -p $(BUILD)
