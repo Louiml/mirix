@@ -29,6 +29,9 @@
 #define SYS_win_focus  19  /* (wid) — raise + focus */
 #define SYS_win_top    20  /* (x, y) -> wid of topmost window at point, -1 */
 #define SYS_uptime     21  /* () -> milliseconds since timer start */
+/* Phase 8a: e1000 NIC (polled, non-blocking recv) */
+#define SYS_net_send   22  /* (buf, len) -> 0 or -err */
+#define SYS_net_recv   23  /* (buf, maxlen) -> bytes (0 = none) */
 
 void syscall_init(void);
 

@@ -25,6 +25,7 @@
 #include "drivers/pci.h"
 #include "drivers/ps2.h"
 #include "drivers/ahci.h"
+#include "drivers/e1000.h"
 #include "fs/vfs.h"
 #include "proc/thread.h"
 #include "proc/syscall.h"
@@ -91,7 +92,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 7c: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 8a: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -275,6 +276,57 @@ void _start(void)
             uart_printf("ahci: LBA 100 read OK (%ld bytes), magic='%.11s'\n", n, diskbuf);
         else
             uart_printf("ahci: LBA 100 read %ld bytes, magic MISMATCH\n", n);
+    }
+
+    /* Phase 8a: e1000 NIC — ARP who-has 10.0.2.2 (QEMU slirp gateway), expect
+     * an ARP reply. Proves the full TX+RX DMA path. */
+    if (e1000_init() == 0) {
+        uint8_t mac[6];
+        e1000_get_mac(mac);
+        uint8_t frame[60];
+        memset(frame, 0, sizeof frame);
+        /* eth header: broadcast, our mac, ARP */
+        memset(frame + 0, 0xff, 6);
+        memcpy(frame + 6, mac, 6);
+        frame[12] = 0x08; frame[13] = 0x06;
+        /* ARP payload */
+        uint8_t *a = frame + 14;
+        a[0] = 0x00; a[1] = 0x01;          /* htype ethernet */
+        a[2] = 0x08; a[3] = 0x00;          /* ptype IPv4 */
+        a[4] = 6;    a[5] = 4;             /* hlen, plen */
+        a[6] = 0x00; a[7] = 0x01;          /* oper: request */
+        memcpy(a + 8, mac, 6);             /* sha */
+        a[14] = 10; a[15] = 0; a[16] = 2; a[17] = 15;   /* spa 10.0.2.15 */
+        memset(a + 18, 0, 6);              /* tha */
+        a[24] = 10; a[25] = 0; a[26] = 2; a[27] = 2;    /* tpa 10.0.2.2 */
+        cli();
+        uart_printf("e1000: sent ARP request for 10.0.2.2 (%d bytes)\n", (int)sizeof frame);
+        sti();
+        if (e1000_send(frame, sizeof frame) == 0) {
+            uint8_t rx[2048];
+            long got = 0;
+            for (int t = 0; t < 3000 && got <= 0; t++) {
+                got = e1000_recv(rx, (long)sizeof rx);
+                if (got <= 0)
+                    msleep(1);
+            }
+            if (got >= 42 && rx[12] == 0x08 && rx[13] == 0x06 &&
+                rx[20] == 0x00 && rx[21] == 0x02 &&      /* ARP reply */
+                rx[28] == 10 && rx[29] == 0 && rx[30] == 2 && rx[31] == 2) {  /* spa = 10.0.2.2 */
+                cli();
+                uart_printf("e1000: ARP reply from 10.0.2.2 mac=%02x:%02x:%02x:%02x:%02x:%02x (%ld bytes RX)\n",
+                            rx[22], rx[23], rx[24], rx[25], rx[26], rx[27], got);
+                sti();
+            } else {
+                cli();
+                uart_printf("e1000: no ARP reply (got %ld)\n", got);
+                sti();
+            }
+        } else {
+            uart_printf("e1000: ARP send FAILED\n");
+        }
+    } else {
+        uart_printf("e1000: no 8086:10d3 NIC found (skipping net test)\n");
     }
 
     /* Phase 5a/7b: syscalls + per-process address spaces; 2 demo processes +

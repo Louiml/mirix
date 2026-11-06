@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 7c: kernel entered"
+BANNER = "MirixOS phase 8a: kernel entered"
 
 HD = BUILD / "mirix.img"
 
@@ -95,6 +95,10 @@ def main() -> int:
         "-drive", f"if=pflash,format=raw,file={BUILD / 'OVMF_VARS.fd'}",
         "-drive", f"if=none,id=hd0,file={HD},format=raw",
         "-device", "ide-hd,drive=hd0,bus=ide.0",
+        # Phase 8a: q35's DEFAULT NIC is a classic e1000 (8086:10d3) on
+        # slirp user networking (gateway 10.0.2.2 answers ARP) — no extra
+        # flags needed. (Note: on QEMU 11.1, "-nic user,model=e1000" is
+        # "not supported by this machine" and falls back to e1000e.)
         "-display", "none",
         "-serial", f"file:{SERIAL}",
         "-monitor", f"unix:{MON},server,nowait",
@@ -322,6 +326,13 @@ def main() -> int:
         and "ahci: LBA 100 read OK (4096 bytes), magic='MIRIXLBA100" in serial
         and "disk: LBA 0 read 4096 bytes, first 32: 'MIRIXAHCI0MirixOS AHCI" in serial
     )
+    # Phase 8a: e1000 TX+RX proven by an ARP exchange with the slirp gateway
+    ok_net = (
+        "e1000: 8086:10d3" in serial
+        and "e1000: RX/TX rings ready" in serial
+        and "e1000: sent ARP request for 10.0.2.2" in serial
+        and "e1000: ARP reply from 10.0.2.2 mac=52:55:0a:00:02:02" in serial
+    )
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -343,6 +354,7 @@ def main() -> int:
         and ok_aurora
         and ok_pty
         and ok_files
+        and ok_net
     )
 
     ok_screen = False

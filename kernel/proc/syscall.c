@@ -8,6 +8,7 @@
 #include "fs/vfs.h"
 #include "drivers/ps2.h"
 #include "drivers/ahci.h"
+#include "drivers/e1000.h"
 #include "drivers/fb.h"
 #include "drivers/timer.h"
 #include "gui/wm.h"
@@ -213,6 +214,18 @@ uint64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3,
     case SYS_win_focus:  wm_focus((int)a1); return 0;
     case SYS_win_top:    return (uint64_t)wm_top_at((int)a1, (int)a2);
     case SYS_uptime:     return (uint64_t)(timer_ticks() * 1000ULL / TIMER_HZ);
+    case SYS_net_send: {
+        uint64_t buf = a1, len = a2;
+        if (!is_user_addr(buf) || !is_user_addr(buf + len) || len == 0 || len > 2048)
+            return (uint64_t)-22;
+        return (uint64_t)e1000_send((const void *)buf, (uint16_t)len);
+    }
+    case SYS_net_recv: {
+        uint64_t buf = a1, maxlen = a2;
+        if (!is_user_addr(buf) || !is_user_addr(buf + maxlen) || maxlen == 0)
+            return (uint64_t)-22;
+        return (uint64_t)e1000_recv((void *)buf, (long)maxlen);
+    }
     case SYS_gettid:
         return (uint64_t)current_thread_id();
     case SYS_yield:
