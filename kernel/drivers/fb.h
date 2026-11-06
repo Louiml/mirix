@@ -14,6 +14,10 @@ uint32_t fb_height(void);
 
 void fb_clear(uint32_t rgb);
 void fb_putpixel(uint32_t x, uint32_t y, uint32_t rgb);
+/* Phase 6c (TrueType AA): read a pixel as 0xRRGGBB and alpha-blend onto the
+ * back buffer (src-over). */
+uint32_t fb_getpixel(uint32_t x, uint32_t y);
+void fb_blendpixel(uint32_t x, uint32_t y, uint32_t rgb, uint8_t alpha);
 /* Draw a string at pixel (x, y), each glyph scaled `scale` times. */
 void fb_text(uint32_t x, uint32_t y, uint8_t scale, uint32_t rgb, const char *s);
 

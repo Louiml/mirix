@@ -200,6 +200,47 @@ void fb_printf(const char *fmt, ...)
 void fb_set_mirror(int on) { g_mirror = on; }
 int  fb_mirror(void)        { return g_mirror; }
 
+/* ---- Phase 6c: pixel read + alpha blend (for the TrueType renderer) ---- */
+
+uint32_t fb_getpixel(uint32_t x, uint32_t y)
+{
+    if (!g_ok || x >= g_w || y >= g_h)
+        return 0;
+    uint8_t *src = (uint8_t *)g_draw + y * g_pitch + x * g_bytespp;
+    uint32_t px = 0;
+    for (uint32_t i = 0; i < g_bytespp; i++)
+        px |= (uint32_t)src[i] << (8 * i);
+    uint32_t r = (px >> g_rshift) & ((1u << g_rsize) - 1);
+    uint32_t g = (px >> g_gshift) & ((1u << g_gsize) - 1);
+    uint32_t b = (px >> g_bshift) & ((1u << g_bsize) - 1);
+    /* normalize each channel to 8 bits */
+    if (g_rsize && g_rsize < 8) r = (r * 255) / ((1u << g_rsize) - 1);
+    if (g_gsize && g_gsize < 8) g = (g * 255) / ((1u << g_gsize) - 1);
+    if (g_bsize && g_bsize < 8) b = (b * 255) / ((1u << g_bsize) - 1);
+    if (g_rsize > 8) r >>= (g_rsize - 8);
+    if (g_gsize > 8) g >>= (g_gsize - 8);
+    if (g_bsize > 8) b >>= (g_bsize - 8);
+    return (r << 16) | (g << 8) | b;
+}
+
+void fb_blendpixel(uint32_t x, uint32_t y, uint32_t rgb, uint8_t alpha)
+{
+    if (!g_ok || x >= g_w || y >= g_h || alpha == 0)
+        return;
+    if (alpha == 255) {
+        fb_putpixel(x, y, rgb);
+        return;
+    }
+    uint32_t dst = fb_getpixel(x, y);
+    uint32_t dr = (dst >> 16) & 0xff, dg = (dst >> 8) & 0xff, db = dst & 0xff;
+    uint32_t sr = (rgb >> 16) & 0xff, sg = (rgb >> 8) & 0xff, sb = rgb & 0xff;
+    uint32_t ia = 255 - alpha;
+    uint32_t r = (sr * alpha + dr * ia) / 255;
+    uint32_t g = (sg * alpha + dg * ia) / 255;
+    uint32_t b = (sb * alpha + db * ia) / 255;
+    fb_putpixel(x, y, (r << 16) | (g << 8) | b);
+}
+
 /* ---- Phase 6a: double buffering ---- */
 
 void fb_enable_double_buffer(void)

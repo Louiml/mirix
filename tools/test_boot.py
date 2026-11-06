@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 6b: kernel entered"
+BANNER = "MirixOS phase 6c: kernel entered"
 
 HD = BUILD / "mirix.img"
 
@@ -248,6 +248,10 @@ def main() -> int:
         and "[mouse] x=" in serial
         and "b=01" in serial
     )
+    ok_ttf = (
+        "ttf: loaded DejaVuSans upm=2048 glyphs=" in serial
+        and re.search(r"ttf: demo rendered, text width at 48px = [1-9]\d* px", serial) is not None
+    )
     ok_ahci = (
         "ahci: port 0 online" in serial
         and "ahci: LBA 0 read OK (4096 bytes), magic='MIRIXAHCI0" in serial
@@ -271,6 +275,7 @@ def main() -> int:
         and ok_fs
         and ok_ahci
         and ok_fb6
+        and ok_ttf
     )
 
     ok_screen = False

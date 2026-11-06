@@ -31,6 +31,8 @@
 #include "proc/elf.h"
 #include "hello_elf.h"   /* generated: embedded user demo (build/hello_elf.h) */
 #include "shell_elf.h"   /* generated: embedded mirsh (build/shell_elf.h) */
+#include "DejaVuSans_ttf.h"  /* generated: embedded font (build/DejaVuSans_ttf.h) */
+#include "lib/ttf.h"
 
 #define LIMINE_REQ __attribute__((section(".limine_requests"), used))
 
@@ -87,7 +89,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 6b: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 6c: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -170,6 +172,22 @@ void _start(void)
         uart_printf("fb: double buffer ready (%ux%u, back buffer %llu KiB), main loop presents\n",
                     fb_width(), fb_height(),
                     (unsigned long long)((uint64_t)fb_width() * fb_height() * 4 / 1024));
+    }
+
+    /* Phase 6c: TrueType renderer — load the embedded DejaVuSans and draw a
+     * demo string with antialiased glyphs onto the back buffer. */
+    if (ttf_load(dejavu_sans_ttf, dejavu_sans_ttf_len) == 0) {
+        uart_printf("ttf: loaded DejaVuSans upm=%u glyphs=%u cmap=fmt4\n",
+                    ttf_upm(), ttf_num_glyphs());
+        if (fb_ready()) {
+            ttf_draw_text(40, 60, 48, 0xffffff, "MirixOS TrueType");
+            ttf_draw_text(40, 130, 24, 0x66ccff, "antialiased 16.16 fixed-point renderer");
+            ttf_draw_text(40, 170, 16, 0xffcc44, "The quick brown fox jumps over the lazy dog 0123456789");
+            int wpx = ttf_text_width("MirixOS TrueType", 48);
+            uart_printf("ttf: demo rendered, text width at 48px = %d px\n", wpx);
+        }
+    } else {
+        uart_printf("ttf: load FAILED\n");
     }
 
     /* VMM round-trip: map a scratch page, write through it, read back,

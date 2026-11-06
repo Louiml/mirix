@@ -25,12 +25,18 @@ USER_CFLAGS := --target=x86_64-unknown-none \
 USER_PROGS  := hello shell
 USER_HDRS   := $(patsubst %,$(BUILD)/%_elf.h,$(USER_PROGS))
 
+# Embedded TrueType font (Phase 6c): assets/fonts/DejaVuSans.ttf -> C array.
+FONT_HDR    := $(BUILD)/DejaVuSans_ttf.h
+$(FONT_HDR): assets/fonts/DejaVuSans.ttf tools/elf2h.py
+	@mkdir -p $(BUILD)
+	python3 tools/elf2h.py $< dejavu_sans_ttf > $@
+
 KERNEL_SRCS := $(shell find kernel -name '*.c')
 KERNEL_ASMS := $(shell find kernel -name '*.asm')
 KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD)/obj/%.o,$(KERNEL_SRCS)) \
                $(patsubst kernel/%.asm,$(BUILD)/obj-asm/%.o,$(KERNEL_ASMS))
 # generated headers must exist before compiling kernel objects that include them
-$(KERNEL_OBJS): | $(USER_HDRS)
+$(KERNEL_OBJS): | $(USER_HDRS) $(FONT_HDR)
 
 QEMU       := qemu-system-x86_64
 OVMF_CODE  := /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -53,7 +59,7 @@ $(BUILD)/obj-asm/%.o: kernel/%.asm
 	@mkdir -p $(dir $@)
 	nasm -f elf64 -g -F dwarf $< -o $@
 
-$(KERNEL_ELF): $(KERNEL_OBJS) $(USER_HDRS) kernel/linker.ld
+$(KERNEL_ELF): $(KERNEL_OBJS) $(USER_HDRS) $(FONT_HDR) kernel/linker.ld
 	@mkdir -p $(BUILD)
 	ld.lld $(LDFLAGS) -o $@ $(KERNEL_OBJS)
 
