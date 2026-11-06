@@ -26,6 +26,7 @@
 #include "drivers/ps2.h"
 #include "drivers/ahci.h"
 #include "drivers/e1000.h"
+#include "drivers/acpi.h"
 #include "fs/vfs.h"
 #include "proc/thread.h"
 #include "proc/syscall.h"
@@ -58,6 +59,9 @@ static volatile struct limine_memmap_request memmap_request LIMINE_REQ = {
 };
 static volatile struct limine_framebuffer_request framebuffer_request LIMINE_REQ = {
     .id = LIMINE_FRAMEBUFFER_REQUEST_ID, .revision = 0, .response = 0,
+};
+static volatile struct limine_rsdp_request rsdp_request LIMINE_REQ = {
+    .id = LIMINE_RSDP_REQUEST_ID, .revision = 0, .response = 0,
 };
 
 static volatile uint64_t requests_end[4] LIMINE_REQ = LIMINE_REQUESTS_END_MARKER;
@@ -92,7 +96,7 @@ static const char *memmap_type_name(uint64_t t)
 void _start(void)
 {
     uart_init();
-    uart_printf("MirixOS phase 8a: kernel entered (64-bit, higher half)\n");
+    uart_printf("MirixOS phase 8b: kernel entered (64-bit, higher half)\n");
 
     if (bootloader_info_request.response != 0)
         uart_printf("bootloader: %s %s\n",
@@ -254,6 +258,28 @@ void _start(void)
         uart_printf("crash-test: dereferencing NULL -> expect #PF panic\n");
         *(volatile uint64_t *)0 = 0xdeadbeef;   /* -> #PF, vector 14 */
         kpanic("crash-test failed: NULL write did not fault?!\n");
+    }
+
+    /* Phase 8b: ACPI — parse RSDP/XSDT/FADT (via Limine's RSDP request) so
+     * `cmdline: poweroff` can do a clean S5 shutdown. */
+    uint64_t rsdp_phys = 0;
+    if (rsdp_request.response != 0) {
+        uint64_t a = (uint64_t)rsdp_request.response->address;
+        /* Limine may hand back a physical address or an HHDM virtual one —
+         * normalize to physical either way. */
+        rsdp_phys = (a >= g_hhdm_offset) ? (a - g_hhdm_offset) : a;
+    }
+    if (rsdp_phys)
+        acpi_init(rsdp_phys);
+    else
+        uart_printf("acpi: no RSDP from bootloader\n");
+
+    if (strncmp(cmdline, "poweroff", 8) == 0) {
+        uart_printf("cmdline: poweroff requested\n");
+        acpi_poweroff();           /* prints 'acpi: poweroff' marker, S5 */
+        uart_printf("acpi: poweroff did not take effect — halting\n");
+        for (;;)
+            __asm__ volatile ("hlt");
     }
 
     /* Phase 4a: PCI enumeration + PS/2 keyboard input.

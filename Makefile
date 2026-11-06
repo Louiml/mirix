@@ -48,7 +48,7 @@ QEMU_UEFI  := -machine q35 -cpu qemu64 -m 512M -cdrom $(BUILD)/mirixos.iso \
               -no-reboot
 QEMU_BIOS  := -machine q35 -cpu qemu64 -m 512M -cdrom $(BUILD)/mirixos.iso -no-reboot
 
-.PHONY: all iso run run-bios run-headless debug test-boot test-crash clean
+.PHONY: all iso run run-bios run-headless debug test-boot test-crash test-poweroff clean
 
 all: $(KERNEL_ELF)
 
@@ -108,9 +108,15 @@ test-boot: iso $(BUILD)/mirix.img
 	bash tools/test_boot.sh
 
 # Panic-path test: boots a crash-cmdline ISO, expects a #PF panic screen.
-test-crash: $(BUILD)/mirix.img
+test-crash: $(BUILD)/mirix.img $(KERNEL_ELF)
 	MIRIXOS_CMDLINE=crash MIRIXOS_ISO_NAME=mirixos-crash.iso python3 tools/mkiso.py
 	python3 tools/test_crash.py
+
+# Poweroff-path test (Phase 8b): boots a poweroff-cmdline ISO, expects ACPI
+# S5 to make QEMU exit cleanly.
+test-poweroff: $(BUILD)/mirix.img $(KERNEL_ELF)
+	MIRIXOS_CMDLINE=poweroff MIRIXOS_ISO_NAME=mirixos-poweroff.iso python3 tools/mkiso.py
+	python3 tools/test_poweroff.py
 
 # GDB: QEMU waits for a debugger on :1234 (gdb -ex 'target remote :1234').
 debug: iso

@@ -29,7 +29,7 @@ SHOT_TMP = Path("/tmp/mirixos-screen.ppm")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-BANNER = "MirixOS phase 8a: kernel entered"
+BANNER = "MirixOS phase 8b: kernel entered"
 
 HD = BUILD / "mirix.img"
 
@@ -333,6 +333,11 @@ def main() -> int:
         and "e1000: sent ARP request for 10.0.2.2" in serial
         and "e1000: ARP reply from 10.0.2.2 mac=52:55:0a:00:02:02" in serial
     )
+    # Phase 8b: ACPI tables parsed at boot (RSDP via Limine -> XSDT -> FADT)
+    ok_acpi = (
+        "acpi: FADT" in serial
+        and "PM1a_CNT port" in serial
+    )
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -355,6 +360,7 @@ def main() -> int:
         and ok_pty
         and ok_files
         and ok_net
+        and ok_acpi
     )
 
     ok_screen = False
