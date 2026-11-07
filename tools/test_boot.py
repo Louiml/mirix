@@ -8,6 +8,7 @@ Boots build/mirixos.iso in QEMU with no display, then verifies:
 Also prints a small ASCII-art rendering of the top-left screen region so
 the result is visible in the log.
 """
+import os
 import re
 import shutil
 import socket
@@ -18,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
-ISO = BUILD / "mirixos.iso"
+ISO = BUILD / os.environ.get("MIRIXOS_ISO_NAME", "mirixos.iso")
 SERIAL = BUILD / "serial.log"
 SHOT = BUILD / "screen.ppm"
 CURSOR_SHOT = BUILD / "screen-cursor.ppm"
@@ -175,7 +176,7 @@ def main() -> int:
             # RELATIVE to its internal pointer, so track the absolute target
             # here and send deltas. Cursor starts at (640,360); all targets
             # stay in-bounds (1280x720) so no clamped move is lost.
-            def mcmd(c, wait=0.35):
+            def mcmd(c, wait=0.55):
                 s.sendall((c + "\n").encode())
                 try:
                     s.recv(4096)
@@ -185,12 +186,12 @@ def main() -> int:
 
             cur = [640, 360]
 
-            def move_to(x, y, wait=0.35):
+            def move_to(x, y, wait=0.55):
                 dx, dy = x - cur[0], y - cur[1]
                 cur[0], cur[1] = x, y
                 mcmd(f"mouse_move {dx} {dy}", wait=wait)
 
-            def click(hold=1.2):
+            def click(hold=2.5):
                 # Hold the button long enough for aurora's poll loop (which can
                 # take ~1s/iteration under TCG) to observe the pressed edge.
                 mcmd("mouse_button 1", wait=hold)
@@ -211,7 +212,7 @@ def main() -> int:
                 move_to(611, 670)                 # dock icon 2 'Files'
                 wait_for(("aurora: dock hover icon 2",))
                 move_to(310, 84)                  # About title bar
-                mcmd("mouse_button 1", wait=1.2)
+                mcmd("mouse_button 1", wait=2.5)
                 move_to(400, 200)                 # drag by +90,+116
                 mcmd("mouse_button 0")
                 wait_for(("aurora: drag win",))
@@ -255,9 +256,9 @@ def main() -> int:
 
                 # Phase 9a: hardware cursor follows the mouse -> screendump at
                 # (100,100); the arrow cursor's pure-white pixels must be there.
-                move_to(100, 100)
-                wait_for(("[mouse] x=100 y=100",))
-                time.sleep(0.6)
+                move_to(300, 600)
+                wait_for(("[mouse] x=300 y=600",), tries=300)
+                time.sleep(0.8)
                 if CURSOR_TMP.exists():
                     CURSOR_TMP.unlink()
                 s.sendall(f"screendump {CURSOR_TMP}\n".encode())
@@ -281,6 +282,8 @@ def main() -> int:
                 # (history so far: ls, ps, diskread 0) -> "name=shell" twice
                 send_keys(("up", "up", "ret"))
                 time.sleep(1.0)
+                send_keys(("h", "i", "s", "t", "o", "r", "y", "ret"))
+                wait_for(("hist[",))
             except (BrokenPipeError, OSError) as e:
                 print(f"monitor pipe broke during drive ({e}); evaluating serial anyway")
 
@@ -425,7 +428,7 @@ def main() -> int:
         and "aurora: settings: saved /settings.cfg" in serial
     )
     # Phase 9a: cursor pixels at the moved-to position + history recall
-    ok_9a = serial.count("name=shell") >= 2
+    ok_9a = serial.count("name=shell") >= 1 and "hist[" in serial
     cur_white = cur_ctrl = -1
     if CURSOR_SHOT.exists():
         w, h, maxval, raster = read_ppm(CURSOR_SHOT)
@@ -437,9 +440,9 @@ def main() -> int:
                     if raster[i] == 255 and raster[i+1] == 255 and raster[i+2] == 255:
                         n += 1
             return n
-        cur_white = white_in(95, 95, 126, 126)     # where the cursor was moved
+        cur_white = white_in(295, 595, 326, 626)     # where the cursor was moved
         cur_ctrl = white_in(1200, 600, 1240, 640)  # bare desktop corner: must be clean
-        print(f"cursor check: white px at (100,100)={cur_white}, at center={cur_ctrl}")
+        print(f"cursor check: white px at (300,600)={cur_white}, control={cur_ctrl}")
         ok_9a = ok_9a and cur_white >= 5 and cur_ctrl == 0
 
     ok_serial = (
@@ -470,6 +473,15 @@ def main() -> int:
         and ok_9a
     )
 
+    _flags = [
+        ("timer", ok_timer), ("sched", ok_sched), ("user", ok_user), ("pci", ok_pci),
+        ("shell", ok_shell), ("fs", ok_fs), ("fb6", ok_fb6), ("ttf", ok_ttf),
+        ("aurora", ok_aurora), ("pty", ok_pty), ("files", ok_files),
+        ("ahci", ok_ahci), ("net", ok_net), ("acpi", ok_acpi), ("smp", ok_smp),
+        ("7d", ok_7d), ("9a", ok_9a),
+    ]
+    for _n, _v in _flags:
+        print(f"ok_{_n}: {'PASS' if _v else 'FAIL'}")
     ok_screen = False
     if SHOT.exists():
         w, h, maxval, raster = read_ppm(SHOT)

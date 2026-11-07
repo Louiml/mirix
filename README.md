@@ -44,7 +44,7 @@ mirixos/
 ├── boot/            # limine.conf + Limine binaries (pinned release, see boot/LIMINE_VERSION.txt)
 ├── kernel/          # arch/x86_64, mm, sched, fs, drivers, syscall, lib
 ├── userland/        # libc, init, shell, coreutils, gui (later phases)
-├── assets/          # fonts/icons/wallpapers (original or OFL only)
+├── assets/          # fonts/icons/wallpapers (original or freely licensed only)
 ├── tools/           # mkiso.py, test_boot.sh, asset/test scripts
 ├── tests/           # host-side unit tests + QEMU boot tests
 ├── docs/            # ROADMAP.md (checklist), DESIGN.md (memory map, syscall table, drivers)
@@ -73,15 +73,31 @@ wsl -d kali-linux -- bash -c 'cd /mnt/d/mirixos && make iso'
 - **QEMU**: `qemu-system-x86_64 -machine q35 -m 512M -smp 4 -cdrom build/mirixos.iso`
   (add `-drive if=none,id=hd0,file=build/mirix.img,format=raw -device ide-hd,drive=hd0,bus=ide.0`
   to attach the AHCI test disk; `make run` does UEFI+OVMF with a GUI window)
-- **VirtualBox / VMware**: create a new VM (OS type "Other/Unknown", 64-bit,
+- **VirtualBox**: create a new VM (OS type "Other/Unknown", **64-bit**,
   >= 512 MB RAM, >= 4 CPUs), attach `mirixos.iso` as the optical drive, boot.
-  Enable UEFI *or* leave BIOS — both work. The Aurora desktop comes up;
-  click the dock icons (About / Clock / Files / Terminal / Editor / Settings).
+  Enable UEFI *or* leave BIOS — both work. Required VM settings for input:
+  - Settings → System → **Pointing Device = "PS/2 Mouse"** (the default USB
+    tablet needs Guest Additions, which a custom OS doesn't have; the
+    "mouse pointer integration not supported" popup is expected and harmless).
+  - Settings → System → Motherboard: leave **"Enable I/O APIC" on** (VirtualBox
+    turns it on automatically for >1 vCPU). MirixOS detects it via the ACPI
+    MADT and routes keyboard IRQ1 / mouse IRQ12 through the IO-APIC; with 1 vCPU
+    or the legacy PIC it falls back automatically (`force_pic` cmdline forces
+    PIC for tests).
+  - Click inside the VM display to **capture** the mouse/keyboard; **Right
+    Ctrl** releases them.
+  - Settings → Ports → Serial Ports: enable **Port 1**, mode **Raw File**,
+    path e.g. `C:\mirix-serial.log`. Any kernel panic prints
+    `exception: <name> (vector N, error 0x…) at rip=… cpu=… proc=…` + `cr2=…`
+    there before the red screen — send that log if anything still crashes.
+  The Aurora desktop comes up; click the dock icons (About / Clock / Files /
+  Terminal / Editor / Settings).
 
 ## Tests
 
 ```sh
-make test-boot       # headless boot: serial markers + screendump checks (Phase 7d apps included)
+make test-boot       # full scripted desktop drive on a force_pic ISO (serial + screendump + cursor/history)
+make test-ioapic     # Phase 9b: default ISO on q35 — IO-APIC active, keyboard/mouse/history, 0 exceptions
 make test-crash      # panic path: crash-cmdline ISO, expects #PF red panic screen
 make test-poweroff   # ACPI S5: poweroff-cmdline ISO, QEMU must exit on its own
 make test-stress     # Definition-of-done: 30 min input-hammering stress run (-smp 4)
@@ -114,4 +130,8 @@ switches over 30 min on `-smp 4`, desktop still rendering at the end).
 Phase 9a (interactive input) done: hardware cursor follows the PS/2 mouse,
 arrow keys + shell history (UP/DOWN) work in the Terminal, keyboard
 routing follows window focus — `make test-boot` PASS x3.
+Phase 9b (VirtualBox compatibility) done: IO-APIC interrupt routing (MADT) with
+PIC fallback, robust PS/2 IRQ draining, window clamping to the real
+framebuffer, `history` shell command — `make test-boot` (force_pic drive)
+PASS and `make test-ioapic` PASS, 0 exceptions, SeaBIOS boot also clean.
 Definition of done: all met (see docs/ROADMAP.md).

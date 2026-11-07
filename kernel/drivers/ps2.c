@@ -1,5 +1,6 @@
 #include "ps2.h"
 #include "drivers/pic.h"
+#include "drivers/ioapic.h"
 #include "drivers/fb.h"
 #include "lib/io.h"
 #include "lib/uart.h"
@@ -131,39 +132,45 @@ int input_pop_filtered(input_event_t *out, int filter)
 
 void ps2_mouse_irq(void)
 {
-    /* AUX output buffer full (status bit 5) and data available (bit 0). */
-    if (!(inb(PS2_STATUS) & 0x21) || !(inb(PS2_STATUS) & 0x20))
-        return;
+    /* Drain every pending AUX byte. If several bytes are already in the
+     * output buffer when the IRQ fires, the (edge-triggered) line may not
+     * rise again after the first read, so read them all now, bounded, instead
+     * of losing whole mouse packets — this is what made the cursor drift when
+     * IRQs arrived via the IO-APIC. */
     static uint8_t pkt[3];
     static uint8_t idx = 0;
-    pkt[idx++] = inb(PS2_DATA);
-    if (idx < 3)
-        return;
-    idx = 0;
+    for (int guard = 0; guard < 16; guard++) {
+        if (!(inb(PS2_STATUS) & 0x01) || !(inb(PS2_STATUS) & 0x20))
+            break;                              /* no (more) AUX data */
+        pkt[idx++] = inb(PS2_DATA);
+        if (idx < 3)
+            continue;
+        idx = 0;
 
-    int16_t dx = (int16_t)pkt[1];
-    int16_t dy = (int16_t)pkt[2];
-    if (pkt[0] & 0x10) dx |= (int16_t)0xff00;   /* X sign bit (9-bit) */
-    if (pkt[0] & 0x20) dy |= (int16_t)0xff00;   /* Y sign bit */
-    uint8_t buttons = pkt[0] & 0x07;
+        int16_t dx = (int16_t)pkt[1];
+        int16_t dy = (int16_t)pkt[2];
+        if (pkt[0] & 0x10) dx |= (int16_t)0xff00;   /* X sign bit (9-bit) */
+        if (pkt[0] & 0x20) dy |= (int16_t)0xff00;   /* Y sign bit */
+        uint8_t buttons = pkt[0] & 0x07;
 
-    /* PS/2 Y axis is inverted vs screen coordinates. */
-    mouse_event_t ev = { dx, (int16_t)-dy, buttons };
-    mouse_push(&ev);
+        /* PS/2 Y axis is inverted vs screen coordinates. */
+        mouse_event_t ev = { dx, (int16_t)-dy, buttons };
+        mouse_push(&ev);
 
-    spin_lock(&g_input_lock);            /* IRQ context: IF=0 */
-    g_mbtn = buttons;
-    if (fb_ready()) {
-        int nx = g_mx + dx, ny = g_my - dy;
-        if (nx < 0) nx = 0;
-        if (ny < 0) ny = 0;
-        if (nx >= (int)fb_width())  nx = (int)fb_width() - 1;
-        if (ny >= (int)fb_height()) ny = (int)fb_height() - 1;
-        g_mx = nx;
-        g_my = ny;
-        fb_set_cursor(g_mx, g_my, 1);
+        spin_lock(&g_input_lock);            /* IRQ context: IF=0 */
+        g_mbtn = buttons;
+        if (fb_ready()) {
+            int nx = g_mx + dx, ny = g_my - dy;
+            if (nx < 0) nx = 0;
+            if (ny < 0) ny = 0;
+            if (nx >= (int)fb_width())  nx = (int)fb_width() - 1;
+            if (ny >= (int)fb_height()) ny = (int)fb_height() - 1;
+            g_mx = nx;
+            g_my = ny;
+            fb_set_cursor(g_mx, g_my, 1);
+        }
+        spin_unlock(&g_input_lock);
     }
-    spin_unlock(&g_input_lock);
 }
 
 /* ---- scancode set 1 -> ASCII (with shift variants) ---- */
@@ -198,50 +205,53 @@ static const char kbd_shift[64] = {
 
 void ps2_keyboard_irq(void)
 {
-    if (!(inb(PS2_STATUS) & 0x01))
-        return;   /* spurious */
-    uint8_t sc = inb(PS2_DATA);
-
     static uint8_t ext = 0;
     static uint8_t lshift = 0, rshift = 0;
 
-    if (sc == 0xe0) {          /* extended prefix */
-        ext = 1;
-        return;
-    }
+    /* Drain all pending scancodes (bounded): if several bytes are waiting
+     * when the IRQ fires, the edge-triggered line may not rise again, so
+     * process them all now rather than dropping key bytes. */
+    for (int guard = 0; guard < 16 && (inb(PS2_STATUS) & 0x01); guard++) {
+        uint8_t sc = inb(PS2_DATA);
 
-    uint8_t code = sc & 0x7f;
-    int pressed = !(sc & 0x80);
-    if (code == 0x2a) lshift = pressed;
-    if (code == 0x36) rshift = pressed;
-
-    kbd_event_t ev;
-    ev.code = code;
-    ev.pressed = (uint8_t)pressed;
-    ev.extended = ext;
-    ev.ascii = 0;
-    if (pressed) {
-        if (ext) {
-            /* Phase 9a: 0xE0-extended keys — arrows, home/end, pgup/pgdn, del */
-            switch (code) {
-            case 0x1c: ev.ascii = '\n';        break;   /* keypad Enter */
-            case 0x48: ev.ascii = (char)KEY_UP;    break;
-            case 0x50: ev.ascii = (char)KEY_DOWN;  break;
-            case 0x4b: ev.ascii = (char)KEY_LEFT;  break;
-            case 0x4d: ev.ascii = (char)KEY_RIGHT; break;
-            case 0x47: ev.ascii = (char)KEY_HOME;  break;
-            case 0x4f: ev.ascii = (char)KEY_END;   break;
-            case 0x49: ev.ascii = (char)KEY_PGUP;  break;
-            case 0x51: ev.ascii = (char)KEY_PGDN;  break;
-            case 0x53: ev.ascii = (char)KEY_DEL;   break;
-            default: break;
-            }
-        } else if (code < 64) {
-            ev.ascii = (lshift || rshift) ? kbd_shift[code] : kbd_lower[code];
+        if (sc == 0xe0) {          /* extended prefix */
+            ext = 1;
+            continue;
         }
+
+        uint8_t code = sc & 0x7f;
+        int pressed = !(sc & 0x80);
+        if (code == 0x2a) lshift = pressed;
+        if (code == 0x36) rshift = pressed;
+
+        kbd_event_t ev;
+        ev.code = code;
+        ev.pressed = (uint8_t)pressed;
+        ev.extended = ext;
+        ev.ascii = 0;
+        if (pressed) {
+            if (ext) {
+                /* Phase 9a: 0xE0-extended keys — arrows, home/end, pgup/pgdn, del */
+                switch (code) {
+                case 0x1c: ev.ascii = '\n';        break;   /* keypad Enter */
+                case 0x48: ev.ascii = (char)KEY_UP;    break;
+                case 0x50: ev.ascii = (char)KEY_DOWN;  break;
+                case 0x4b: ev.ascii = (char)KEY_LEFT;  break;
+                case 0x4d: ev.ascii = (char)KEY_RIGHT; break;
+                case 0x47: ev.ascii = (char)KEY_HOME;  break;
+                case 0x4f: ev.ascii = (char)KEY_END;   break;
+                case 0x49: ev.ascii = (char)KEY_PGUP;  break;
+                case 0x51: ev.ascii = (char)KEY_PGDN;  break;
+                case 0x53: ev.ascii = (char)KEY_DEL;   break;
+                default: break;
+                }
+            } else if (code < 64) {
+                ev.ascii = (lshift || rshift) ? kbd_shift[code] : kbd_lower[code];
+            }
+        }
+        ext = 0;
+        kbd_push(&ev);
     }
-    ext = 0;
-    kbd_push(&ev);
 }
 
 void ps2_init(void)
@@ -269,7 +279,12 @@ void ps2_init(void)
     data_w(0xf4);                       /* enable scanning */
     (void)data_r();                     /* 0xFA */
 
-    pic_clear_mask(1);                  /* unmask IRQ1 in the PIC */
+    if (ioapic_active()) {
+        /* Phase 9b: IRQ1 is redirected through the IO-APIC (ioapic_setup);
+         * keep the 8259 fully masked so the IRQ is not delivered twice. */
+    } else {
+        pic_clear_mask(1);              /* unmask IRQ1 in the PIC */
+    }
     uart_printf("ps2: keyboard ready (IRQ1, scancode set 1, cfg=%02x ack=%02x bat=%02x)\n",
                 cfg, ack, bat);
 
@@ -289,7 +304,9 @@ void ps2_init(void)
         g_my = (int)fb_height() / 2;
         fb_set_cursor(g_mx, g_my, 1);
     }
-    pic_clear_mask(2);                  /* unmask the cascade on the master */
-    pic_clear_mask(12);                 /* unmask IRQ12 (slave PIC) */
+    if (!ioapic_active()) {
+        pic_clear_mask(2);              /* unmask the cascade on the master */
+        pic_clear_mask(12);             /* unmask IRQ12 (slave PIC) */
+    }
     uart_printf("ps2: mouse ready (IRQ12, 3-byte packets, reporting on, cfg=%02x)\n", cfg);
 }

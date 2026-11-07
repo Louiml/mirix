@@ -4,6 +4,7 @@
 #include "lib/uart.h"
 #include "lib/panic.h"
 #include "drivers/pic.h"
+#include "drivers/ioapic.h"
 #include "drivers/timer.h"
 #include "drivers/lapic.h"
 #include "drivers/ps2.h"
@@ -89,12 +90,18 @@ void irq_handler(registers_t *regs)
     }
     if (v == IRQ_BASE + 1) {  /* PS/2 keyboard */
         ps2_keyboard_irq();
-        pic_eoi((uint8_t)v);
+        /* Phase 9b: the IRQ may have arrived via the IO-APIC, not the PIC */
+        /* IO-APIC-delivered IRQs still end at the local APIC: a plain LAPIC
+         * EOI is sufficient (the IO-APIC EOI register is only an alternative
+         * broadcast path — sending both double-EOIs and can lose edges). */
+        if (ioapic_active()) lapic_eoi();
+        else pic_eoi((uint8_t)v);
         return;
     }
     if (v == IRQ_BASE + 12) { /* PS/2 mouse */
         ps2_mouse_irq();
-        pic_eoi((uint8_t)v);
+        if (ioapic_active()) lapic_eoi();
+        else pic_eoi((uint8_t)v);
         return;
     }
     if (v >= 32 + 16) {

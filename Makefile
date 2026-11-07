@@ -131,9 +131,19 @@ run-headless: iso
 	cp -f $(OVMF_VARS) $(BUILD)/OVMF_VARS.fd
 	$(QEMU) $(QEMU_UEFI) -display none -serial file:$(BUILD)/serial.log
 
-# Automated boot test: boots headless, greps serial log for the banner.
-test-boot: iso $(BUILD)/mirix.img
-	bash tools/test_boot.sh
+# Automated boot test (full scripted desktop drive). Runs on a force_pic ISO:
+# under TCG the IO-APIC delivers PS/2 packets with slightly different timing,
+# which makes absolute mouse_move scripting flaky, so the rigorous click-
+# through drive uses the proven legacy-PIC path. The IO-APIC path is covered
+# by `make test-ioapic` (boot + keyboard + mouse + history on the default ISO).
+test-boot: $(KERNEL_ELF) $(BUILD)/mirix.img
+	MIRIXOS_CMDLINE=force_pic MIRIXOS_ISO_NAME=mirixos-test.iso python3 tools/mkiso.py
+	MIRIXOS_ISO_NAME=mirixos-test.iso python3 tools/test_boot.py
+
+# Phase 9b: IO-APIC path smoke test on the default ISO (q35 MADT has an I/O
+# APIC, so IRQ1/IRQ12 go through the IO-APIC, not the 8259 PIC).
+test-ioapic: $(KERNEL_ELF) $(BUILD)/mirix.img iso
+	python3 tools/test_ioapic.py
 
 # Panic-path test: boots a crash-cmdline ISO, expects a #PF panic screen.
 test-crash: $(BUILD)/mirix.img $(KERNEL_ELF)

@@ -124,7 +124,7 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
         math in 16.16 fixed point (kernel is -mno-sse, no FPU), nonzero-
         winding scanline fill with 4x horizontal subsampling → 8-bit alpha
         bitmaps, 192-entry LRU glyph cache keyed (codepoint, px). DejaVuSans
-        (757 KB, OFL, `assets/fonts/LICENSE-DejaVu.txt`) embedded via
+        (757 KB, Bitstream Vera license — `assets/fonts/LICENSE-DejaVu.txt`; the DejaVu changes are public domain) embedded via
         `tools/elf2h.py` → `build/DejaVuSans_ttf.h`. `fb_getpixel`/
         `fb_blendpixel` (src-over) added to fb.c. Boot draws demo strings;
         serial: `ttf: loaded DejaVuSans upm=2048 glyphs=6253`,
@@ -314,6 +314,51 @@ follows the mouse and a working terminal with line editing.
   62 white px at (100,100) / 0 in control box, serial + screen checks
   PASS, 0 exceptions.
 
+## Phase 9b — VirtualBox compatibility (done 2026-11-07)
+
+Goal: boot and be fully interactive in VirtualBox (the v1.0 pain points were a
+red kernel-panic screen mid-desktop-init, a missing dock, and an uncaptured
+mouse — all symptoms of interrupt routing + a hard fault in the new IO-APIC
+path, fixed here).
+
+- **IO-APIC support** (`kernel/drivers/ioapic.{c,h}`, new): VirtualBox enables
+  the I/O APIC for multi-vCPU VMs, so IRQ1/IRQ12 bypass the legacy 8259 PIC we
+  used to drive. `acpi.c` gained `acpi_find_table()` (MADT = signature "APIC");
+  `ioapic_setup()` maps the IO-APIC MMIO, masks all pins, then redirects pin 1
+  -> vector 0x21 and pin 12 -> vector 0x2c (edge, active-high, dest = BSP APIC
+  id 0). In IO-APIC mode the 8259 stays fully masked and the IRQ handler sends
+  a plain LAPIC EOI; without a MADT I/O APIC (or with cmdline `force_pic`) the
+  legacy PIC path is used unchanged. MMIO is mapped at `0xffffffffd0001000`
+  (the vmm self-test region — Limine's higher-half page tables have huge-page
+  entries elsewhere that `vmm_map` cannot split; the first attempt at
+  `0xffffffffe2000000` #PF'd exactly there) and the mapping is verified with
+  `vmm_get_physical` before use, falling back to PIC on mismatch. MADT
+  physical addresses are sanity-checked (low 4 GiB) with a `0xfec00000`
+  default — QEMU q35 and VirtualBox both use it.
+- **Robust PS/2 IRQ handlers** (`kernel/drivers/ps2.c`): keyboard and mouse
+  handlers now drain *all* pending output-buffer bytes (bounded) per IRQ, so a
+  burst of bytes cannot be lost when the edge-triggered line doesn't rise
+  again.
+- **Window clamping** (`user/aurora.c`): `add_win` clamps x/y/w/h to the real
+  framebuffer size from `SYS_fbinfo`, so on a smaller VBE mode nothing renders
+  off-screen (the dock can no longer be "missing" because it was positioned
+  outside the visible fb).
+- **`history` shell command** (`user/shell.c`): prints the 32-entry ring as
+  `hist[i] <cmd>`.
+- **Tests**: `make test-boot` now runs the full scripted desktop drive on a
+  `force_pic` ISO (`mirixos-test.iso`) — PASS (cursor check 62 white px at the
+  moved-to position / 0 in the control box, 0 exceptions, `hist[` marker).
+  `make test-ioapic` (new, `tools/test_ioapic.py`) boots the default ISO on
+  q35 (MADT has an I/O APIC) and requires: `ioapic: phys ... pin1->vec 33,
+  pin12->vec 44`, desktop ready, keyboard-driven `ls`/`ps`/`history`
+  (`hist[`), a PS/2 mouse packet, a rendered screendump, and zero exceptions —
+  PASS. SeaBIOS boot of the default ISO on q35 also reaches Aurora with the
+  IO-APIC active and 0 exceptions.
+- **README**: new "Running in VirtualBox" section (PS/2 pointing device,
+  click-to-capture / Right-Ctrl release, COM1 raw-file serial log for the
+  `exception: ...` panic line, keep "Enable I/O APIC" on for multi-vCPU VMs,
+  64-bit CPU).
+
 ## Definition of done (v1.0) — ALL MET (2026-11-06)
 
 - [x] Boots to the graphical desktop in QEMU (`make test-boot` PASS: serial
@@ -331,3 +376,37 @@ follows the mouse and a working terminal with line editing.
       (`make test-stress`, STRESS_SECONDS=1800: PASS — 0 exceptions/panics,
       285k context switches, 506k ticks, desktop still rendering at the end)
 - [x] Installer/live USB path (`tools/burn.sh`, hybrid BIOS+UEFI ISO)
+
+## Polish Release — phases E0–E9 (2026-11-07 →)
+
+Strictly one phase at a time; each phase ends with all four milestone tests
+passing (`make test-boot`, `test-crash`, `test-poweroff`, `test-stress
+STRESS_SECONDS=90`) plus before/after proof (screenshots for visual changes,
+numbers for perf changes) recorded in docs/AUDIT.md / docs/METRICS.md.
+
+- [ ] **E0 — Audit + quick wins** — read-only audit (docs/AUDIT.md, docs/METRICS.md)
+      + 5 approved quick wins: resize stride fix, damage tracking v1 + cursor
+      composited last, `is_user_range` + `win_*` ownership checks, license
+      wording fix, drift-free 50 fps frame pacing. See AUDIT.md §5 for the list.
+- [ ] **E1 — Baseline hygiene** — commit E0, tag v1.0.x, decide any leftover
+      uncommitted work, lock the test harness as the regression gate.
+- [ ] **E2 — Rendering performance** — damage tracking to completion (clip-scoped
+      compositor loops so render cost ∝ dirty rect), partial present, resize
+      fix verification, frame pacing numbers vs the 16.6 ms @1280x720 p95 target
+      (TCG + KVM labeled).
+- [ ] **E3 — Display modes & HiDPI** — mode switching beyond 1280x720, scale
+      factors, multi-resolution.
+- [ ] **E4 — Look & feel** — TTF in userland, theme tokens, real icons,
+      splash screen, animations.
+- [ ] **E5 — Processes & isolation** — multiple user processes with separate
+      address spaces, per-window ownership enforcement, user-fault recovery
+      instead of instant panic (audit tell #1).
+- [ ] **E6 — Persistence** — AHCI WRITE DMA EXT, FS flush/sync path; user data
+      survives reboot (audit tell #3).
+- [ ] **E7 — Input & focus** — per-window event queues, real focus routing
+      replacing the `kbd_editor` flag hack.
+- [ ] **E8 — Observability & soak** — profiler/metrics syscalls (PMM/heap/render
+      timers to userland), KVM smoke test (LAPIC timer IRQ broken under KVM,
+      AUDIT.md §4c), 4 h zero-panic soak.
+- [ ] **E9 — Release sign-off** — full test matrix on TCG, docs sweep
+      (ROADMAP/DESIGN/AUDIT/METRICS), release notes, final tag.

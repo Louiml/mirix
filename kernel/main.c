@@ -28,6 +28,7 @@
 #include "drivers/ahci.h"
 #include "drivers/e1000.h"
 #include "drivers/acpi.h"
+#include "drivers/ioapic.h"
 #include "fs/vfs.h"
 #include "proc/thread.h"
 #include "proc/syscall.h"
@@ -71,6 +72,16 @@ static volatile struct limine_mp_request mp_request LIMINE_REQ = {
 static volatile uint64_t requests_end[4] LIMINE_REQ = LIMINE_REQUESTS_END_MARKER;
 
 uint64_t g_hhdm_offset;
+
+/* Phase 9b: cmdline substring check (lib/string.h has no strstr). */
+static int cmdline_has(const char *hay, const char *needle)
+{
+    size_t nl = strlen(needle);
+    for (; *hay; hay++)
+        if (strncmp(hay, needle, nl) == 0)
+            return 1;
+    return 0;
+}
 
 /* Phase 3a demo worker thread */
 static void worker(void)
@@ -287,6 +298,13 @@ void _start(void)
     else
         uart_printf("acpi: no RSDP from bootloader\n");
 
+    /* Phase 9b: if the ACPI MADT advertises an I/O APIC (QEMU q35; VirtualBox
+     * with "Enable I/O APIC" — default for multi-vCPU VMs), route IRQ1/IRQ12
+     * through it instead of the legacy PIC. cmdline "force_pic" keeps the old
+     * PIC path (used by the fallback boot test). */
+    int force_pic = cmdline_has(cmdline, "force_pic");
+    ioapic_setup(force_pic);
+
     if (strncmp(cmdline, "poweroff", 8) == 0) {
         uart_printf("cmdline: poweroff requested\n");
         acpi_poweroff();           /* prints 'acpi: poweroff' marker, S5 */
@@ -393,11 +411,17 @@ void _start(void)
     uart_printf("wm: compositor ready, aurora owns the screen\n");
 
     int alive_n = 0;
+    /* E0 frame pacing: fixed 50 fps frame budget (2 timer ticks @ 100 Hz).
+     * Sleep only the REMAINDER of the frame after the work, so the period is
+     * 20 ms regardless of how long rendering took — the old msleep(20) on
+     * top of the work made the real period 20 ms + render time (drifty). */
+    const uint64_t FRAME_TICKS = 2;
+    uint64_t next_frame = timer_ticks();
     for (;;) {
-        msleep(20);
+        uint64_t t0 = timer_ticks();
         if (wm_dirty() || fb_dirty())
             wm_render();       /* composite desktop into the back buffer */
-        fb_present();   /* Phase 6a/6b: back -> front + cursor (~50 Hz) */
+        fb_present();   /* Phase 6a/6b + E0: dirty rect back -> front + cursor */
         /* mouse events: echo position for the headless test (QEMU monitor
          * `mouse_move`/`mouse_button` inject them) */
         mouse_event_t mev;
@@ -420,5 +444,16 @@ void _start(void)
             uart_printf("[main] alive: %llu switches, %llu ticks\n",
                         (unsigned long long)sched_switches(),
                         (unsigned long long)timer_ticks());
+        /* pace to the frame deadline */
+        next_frame += FRAME_TICKS;
+        uint64_t now = timer_ticks();
+        if (now < next_frame) {
+            uint64_t rem_ms = (next_frame - now) * 1000 / TIMER_HZ;
+            if (rem_ms)
+                msleep(rem_ms);
+        } else {
+            next_frame = now + FRAME_TICKS;   /* fell behind: resync, no spiral */
+        }
+        (void)t0;
     }
 }

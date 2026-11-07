@@ -34,6 +34,9 @@ static uint16_t g_pm1a_cnt;     /* PM1a_CNT_BLK port, 0 = none */
 static uint8_t  g_pm1_cnt_len;
 static uint8_t  g_slp_typ;      /* S5 SLP_TYP from the DSDT _S5 package */
 static int      g_ready;
+static sdt_header_t *g_xsdt;   /* Phase 9b: kept for acpi_find_table */
+static int g_xsd;
+static uint64_t g_n;
 
 /* Scan DSDT AML for Name(_S5, Package(...)) = 08 5F 53 35 5F 12 <pkglen>
  * <numelems> <elem...>; the first ByteConst (0A xx) is SLP_TYPa. */
@@ -84,6 +87,7 @@ int acpi_init(uint64_t rsdp_phys)
     }
     int esz = xsd ? 8 : 4;
     uint64_t n = (xsdt->length - sizeof(sdt_header_t)) / esz;
+    g_xsdt = xsdt; g_xsd = xsd; g_n = n;
     uart_printf("acpi: %s at phys %p len %u -> %llu tables\n",
                 xsd ? "XSDT" : "RSDT", (void *)tbl_phys,
                 xsdt->length, (unsigned long long)n);
@@ -165,4 +169,27 @@ void acpi_poweroff(void)
     outw(g_pm1a_cnt, (uint16_t)(((uint16_t)g_slp_typ << 10) | (1u << 13)));
     for (volatile uint64_t i = 0; i < 50000000ULL; i++)
         ;
+}
+
+/* Phase 9b: generic table lookup (the IO-APIC driver uses this to find the
+ * MADT, signature "APIC"). Returns the table via the HHDM, or 0 if absent. */
+const void *acpi_find_table(const char *sig, uint32_t *len_out)
+{
+    if (!g_xsdt)
+        return 0;
+    int esz = g_xsd ? 8 : 4;
+    for (uint64_t i = 0; i < g_n; i++) {
+        uint64_t tp = g_xsd
+            ? *(uint64_t *)((uint8_t *)g_xsdt + sizeof(sdt_header_t) + i * 8)
+            : *(uint32_t *)((uint8_t *)g_xsdt + sizeof(sdt_header_t) + i * 4);
+        if (tp >= 0x40000000ULL)
+            continue;
+        sdt_header_t *t = (sdt_header_t *)phys_to_virt(tp);
+        if (memcmp(t->sig, sig, 4) == 0) {
+            if (len_out)
+                *len_out = t->length;
+            return t;
+        }
+    }
+    return 0;
 }

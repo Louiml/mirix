@@ -59,6 +59,10 @@ static long syscall6(long nr, long a1, long a2, long a3, long a4, long a5, long 
 #define SYS_uptime     21
 
 #define WIN_BUF_VA_BASE   0x40000000UL
+/* E0: window buffers have a FIXED row stride (== kernel WIN_BUF_STRIDE_PX),
+ * so a window resize changes only the composited rectangle, never the
+ * stride of pixels already in the buffer. */
+#define WBUF_STRIDE       1024
 #define WIN_BUF_VA_STRIDE 0x400000UL
 #define WM_FRAMELESS      1
 #define WM_TITLE_H        28
@@ -126,13 +130,13 @@ static void log2(const char *a, long v)
 static void wpx(uint32_t *buf, int w, int x, int y, uint32_t c)
 {
     if (x < 0 || y < 0 || x >= w) return;
-    buf[y * w + x] = c;
+    buf[y * WBUF_STRIDE + x] = c;
 }
 static void wrect(uint32_t *buf, int w, int h, int x, int y, int rw, int rh, uint32_t c)
 {
     for (int yy = y; yy < y + rh && yy < h; yy++)
         for (int xx = x; xx < x + rw && xx < w; xx++)
-            if (xx >= 0 && yy >= 0) buf[yy * w + xx] = c;
+            if (xx >= 0 && yy >= 0) buf[yy * WBUF_STRIDE + xx] = c;
 }
 static void wcircle(uint32_t *buf, int w, int h, int cx, int cy, int r, uint32_t c)
 {
@@ -141,7 +145,7 @@ static void wcircle(uint32_t *buf, int w, int h, int cx, int cy, int r, uint32_t
             if (xx * xx + yy * yy <= r * r) {
                 int px = cx + xx, py = cy + yy;
                 if (px >= 0 && py >= 0 && px < w && py < h)
-                    buf[py * w + px] = c;
+                    buf[py * WBUF_STRIDE + px] = c;
             }
 }
 static void wround(uint32_t *buf, int w, int h, int x, int y, int rw, int rh, int r, uint32_t c)
@@ -155,7 +159,7 @@ static void wround(uint32_t *buf, int w, int h, int x, int y, int rw, int rh, in
             else if (xx >= rw - r && yy >= rh - r) { dx = xx - (rw - r - 1); dy = yy - (rh - r - 1); corner = 1; }
             if (corner && dx * dx + dy * dy > r * r) continue;
             int px = x + xx, py = y + yy;
-            if (px >= 0 && py >= 0 && px < w && py < h) buf[py * w + px] = c;
+            if (px >= 0 && py >= 0 && px < w && py < h) buf[py * WBUF_STRIDE + px] = c;
         }
 }
 static void wtext(uint32_t *buf, int w, int h, int x, int y, int scale, uint32_t c, const char *s)
@@ -208,6 +212,16 @@ static int kbd_editor;      /* 1 = keystrokes go to the Editor, else to the pty 
 
 static awin_t *add_win(int x, int y, int w, int h, const char *title, int fl)
 {
+    /* Phase 9b: clamp to the real framebuffer size (VirtualBox's VBE mode can
+     * be smaller than QEMU's 1280x720) so no window renders off-screen. */
+    if (SW > 0 && SH > 0) {
+        if (w > SW) w = SW;
+        if (h > SH) h = SH;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x + w > SW) x = SW - w;
+        if (y + h > SH) y = SH - h;
+    }
     for (int i = 0; i < MAXW; i++) {
         if (wins[i].used) continue;
         long wid = sys_win_create(x, y, w, h, title, fl);

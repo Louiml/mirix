@@ -254,6 +254,21 @@ exec:
         }
         else if (eq(cmd, "ps")) cmd_ps();
         else if (eq(cmd, "diskread")) cmd_diskread(arg);
+        else if (eq(cmd, "history")) {
+            /* Phase 9b: print the command history ring */
+            if (hcount == 0)
+                sys_write(1, "history: (empty)\n", 17);
+            for (long i = 0; i < hcount; i++) {
+                char m[160]; long n = 0;
+                n = acpy(m, n, "hist[");
+                n = adec(m, n, i);
+                n = acpy(m, n, "] ");
+                const char *h = hist[i % 32];
+                while (*h && n < (long)sizeof m - 2) m[n++] = *h++;
+                m[n++] = '\n';
+                sys_write(1, m, n);
+            }
+        }
         else if (eq(cmd, "exit")) { sys_exit(0); for (;;) sys_yield(); }
         else {
             on = 0;

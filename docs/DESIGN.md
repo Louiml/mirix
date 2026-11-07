@@ -49,6 +49,13 @@ page across different permissions.
   dump (vector, error, rip/cs/rflags/rsp/ss, cr2/cr3, all GPRs) → halt.
   Verified by `make test-crash` (cmdline `crash` → NULL store → #PF).
 - PIC 8259 remapped to 0x20–0x2f, all masked. LAPIC EOI via HHDM+0xFEE000B0.
+- Phase 9b: if the ACPI MADT advertises an I/O APIC (QEMU q35; VirtualBox with
+  "Enable I/O APIC", the default for multi-vCPU VMs), IRQ1/IRQ12 are redirected
+  through it (`kernel/drivers/ioapic.c`, pins 1/12 -> vectors 0x21/0x2c, edge,
+  dest APIC 0) and the 8259 stays fully masked; otherwise the legacy PIC path
+  is used (`force_pic` cmdline forces it). IO-APIC-delivered IRQs get a plain
+  LAPIC EOI. IO-APIC MMIO is mapped at 0xffffffffd0001000 and verified before
+  use (huge-page PDPT/PD entries elsewhere make vmm_map silently not land).
 
 ## Memory management (Phase 2b, done)
 
@@ -367,6 +374,9 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
   once (so the red screen still appears — crash test 97.4% red).
   `SYS_flip(10)` lets userland request a present; `SYS_fbinfo(11)` returns
   (w, h, 32).
+- Phase 9b: the PS/2 keyboard/mouse IRQ handlers drain every pending
+  output-buffer byte per IRQ (bounded), so edge-triggered delivery cannot drop
+  bytes when several are already buffered.
 - **6b mouse:** IRQ12 (vector 0x2c) → `ps2_mouse_irq()`. The i8042 aux port
   is enabled (0xA8, config bit 1 = IRQ12, 0xF4 reporting, 100 Hz sample
   rate). Packets are 3 bytes; X/Y are 9-bit two's complement (sign-extend
@@ -387,8 +397,9 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
   (codepoint, px). `ttf_draw_text` blends via `fb_blendpixel` (src-over) at
   baseline = y + ascender*px/upm. Scale factor S = px*65536/upm, so
   device16 = font_units * S (the <<16 lives inside S). Font: DejaVuSans.ttf
-  embedded as a C array (`build/DejaVuSans_ttf.h`), OFL license in
-  `assets/fonts/`.
+  embedded as a C array (`build/DejaVuSans_ttf.h`), Bitstream Vera license
+  in `assets/fonts/LICENSE-DejaVu.txt` (DejaVu changes are public domain;
+  NOT the SIL OFL).
 
 ## Window manager / compositor (Phase 7a, done)
 
@@ -534,5 +545,7 @@ icon center.
 
 Original design inspired by macOS: translucent blurred menu bar, centered
 Dock with hover magnification, rounded windows with soft shadows and
-red/yellow/green controls, alpha compositing. Assets: original or OFL
-licensed only (e.g. Inter font). No Apple logos, SF fonts, or Apple icons.
+red/yellow/green controls, alpha compositing. Assets: original or freely
+licensed only — DejaVu under its Bitstream Vera license, font8x8 in the
+public domain, future fonts e.g. Inter under the OFL. No Apple logos, SF
+fonts, or Apple icons.
