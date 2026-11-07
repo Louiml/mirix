@@ -137,7 +137,7 @@ run-headless: iso
 # through drive uses the proven legacy-PIC path. The IO-APIC path is covered
 # by `make test-ioapic` (boot + keyboard + mouse + history on the default ISO).
 test-boot: $(KERNEL_ELF) $(BUILD)/mirix.img
-	MIRIXOS_CMDLINE=force_pic MIRIXOS_ISO_NAME=mirixos-test.iso python3 tools/mkiso.py
+	MIRIXOS_CMDLINE=force_pic MIRIXOS_ISO_NAME=mirixos-test.iso MIRIXOS_RESOLUTION=1280x720x32 python3 tools/mkiso.py
 	MIRIXOS_ISO_NAME=mirixos-test.iso python3 tools/test_boot.py
 
 # Phase 9b: IO-APIC path smoke test on the default ISO (q35 MADT has an I/O

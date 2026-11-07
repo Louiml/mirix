@@ -419,6 +419,7 @@ void _start(void)
     uint64_t next_frame = timer_ticks();
     for (;;) {
         uint64_t t0 = timer_ticks();
+        ps2_poll();   /* Phase 9c: input fallback if an IRQ was missed */
         if (wm_dirty() || fb_dirty())
             wm_render();       /* composite desktop into the back buffer */
         fb_present();   /* Phase 6a/6b + E0: dirty rect back -> front + cursor */

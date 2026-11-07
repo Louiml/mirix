@@ -41,6 +41,10 @@ typedef struct {
 #define KEY_DEL   0x89
 
 void ps2_init(void);
+/* Phase 9c: polling fallback — call from the main loop; if an IRQ was missed
+ * (e.g. IO-APIC routing differences in VirtualBox) this still drains the
+ * i8042 output buffer so keyboard/mouse keep working. */
+void ps2_poll(void);
 void ps2_keyboard_irq(void);          /* called from idt.c on IRQ1 */
 void ps2_mouse_irq(void);             /* called from idt.c on IRQ12 */
 int  kbd_pop(kbd_event_t *out);       /* 1 if an event was popped */

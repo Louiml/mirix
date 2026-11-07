@@ -13,6 +13,7 @@ xorriso writes one ISO that boots both ways: BIOS via El Torito and
 UEFI via the EFI System Partition directory on the ISO9660 volume.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,11 @@ ISO_ROOT = BUILD / "iso_root"
 ISO = BUILD / os.environ.get("MIRIXOS_ISO_NAME", "mirixos.iso")
 # Optional kernel cmdline baked into the ISO's limine.conf (for tests).
 CMDLINE = os.environ.get("MIRIXOS_CMDLINE", "")
+# Video mode baked into limine.conf. Default 1024x768x32: supported by both
+# QEMU/OVMF and VirtualBox VBE (VirtualBox often has no 1280x720 mode, which
+# made the desktop fall back to a tiny mode there). Tests override with
+# MIRIXOS_RESOLUTION=1280x720x32 to keep their absolute pixel coordinates.
+RESOLUTION = os.environ.get("MIRIXOS_RESOLUTION", "1024x768x32")
 
 BOOT_FILES = ["limine.conf", "limine-bios-cd.bin", "limine-bios.sys", "limine-uefi-cd.bin"]
 EFI_FILES = ["BOOTX64.EFI", "BOOTIA32.EFI"]
@@ -43,10 +49,11 @@ def main() -> None:
 
     for name in BOOT_FILES:
         shutil.copy2(ROOT / "boot" / name, boot / name)
+    conf = (ROOT / "boot" / "limine.conf").read_text()
+    conf = re.sub(r"(?m)^resolution:.*$", f"resolution: {RESOLUTION}", conf)
     if CMDLINE:
-        conf = (ROOT / "boot" / "limine.conf").read_text().rstrip("\n")
-        conf += f"\ncmdline: {CMDLINE}\n"
-        (boot / "limine.conf").write_text(conf)
+        conf = conf.rstrip("\n") + f"\ncmdline: {CMDLINE}\n"
+    (boot / "limine.conf").write_text(conf)
     shutil.copy2(kernel, boot / "kernel.elf")
     for name in EFI_FILES:
         shutil.copy2(ROOT / "boot" / name, efi / name)

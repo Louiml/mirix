@@ -173,6 +173,20 @@ void ps2_mouse_irq(void)
     }
 }
 
+void ps2_poll(void)
+{
+    /* If the output buffer is full but the IRQ path did not consume it (IRQ
+     * routing differs on some VMs), drain it here. AUX bit (0x20) selects the
+     * mouse port; the handlers themselves drain all pending bytes. */
+    uint8_t st = inb(PS2_STATUS);
+    if (!(st & 0x01))
+        return;
+    if (st & 0x20)
+        ps2_mouse_irq();
+    else
+        ps2_keyboard_irq();
+}
+
 /* ---- scancode set 1 -> ASCII (with shift variants) ---- */
 static const char kbd_lower[64] = {
     [0x01] = 27,                          /* ESC */

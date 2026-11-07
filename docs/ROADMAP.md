@@ -354,6 +354,13 @@ path, fixed here).
   (`hist[`), a PS/2 mouse packet, a rendered screendump, and zero exceptions —
   PASS. SeaBIOS boot of the default ISO on q35 also reaches Aurora with the
   IO-APIC active and 0 exceptions.
+- **VirtualBox display/input fixes (Phase 9c)**: default boot mode is now
+  `1024x768x32` (`MIRIXOS_RESOLUTION`, override in `tools/mkiso.py`) — VirtualBox
+  VBE commonly has no 1280x720 mode, so the old hint made it fall back to a tiny
+  mode ("everything low quality"). The scripted tests pin `1280x720x32`. Added
+  `ps2_poll()` called every frame from the kernel main loop as an input fallback:
+  if an IRQ is missed on some VM's interrupt routing, the i8042 output buffer is
+  still drained, so keyboard/mouse (and the cursor) keep working.
 - **README**: new "Running in VirtualBox" section (PS/2 pointing device,
   click-to-capture / Right-Ctrl release, COM1 raw-file serial log for the
   `exception: ...` panic line, keep "Enable I/O APIC" on for multi-vCPU VMs,

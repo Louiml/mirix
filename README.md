@@ -28,7 +28,7 @@ kernel image: physical_base=0x... virtual_base=0xffffffff80000000
 HHDM offset: 0xffff800000000000 ...
 memmap: 36 entries ...
 usable RAM: 459 MiB
-framebuffer: 1280x720 bpp=32 pitch=5120 addr=0xffff800080000000
+framebuffer: 1024x768 bpp=32 pitch=4096 addr=0xffff800080000000
 screen: banner + color bars drawn
 ```
 
@@ -90,8 +90,11 @@ wsl -d kali-linux -- bash -c 'cd /mnt/d/mirixos && make iso'
     path e.g. `C:\mirix-serial.log`. Any kernel panic prints
     `exception: <name> (vector N, error 0x…) at rip=… cpu=… proc=…` + `cr2=…`
     there before the red screen — send that log if anything still crashes.
-  The Aurora desktop comes up; click the dock icons (About / Clock / Files /
-  Terminal / Editor / Settings).
+  The Aurora desktop comes up at **1024x768** (a mode VirtualBox VBE always
+  has; override with `MIRIXOS_RESOLUTION=1280x720x32 make iso`). **Maximize the
+  VM window** (or use View → Fullscreen/Scale) so the desktop isn't downscaled —
+  that is what made the text hard to read. Click the dock icons (About / Clock /
+  Files / Terminal / Editor / Settings).
 
 ## Tests
 
