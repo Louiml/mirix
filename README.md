@@ -102,7 +102,7 @@ sudo tools/burn.sh /dev/sdX        # asks for confirmation; --dry-run to preview
 
 ## Status
 
-See [docs/ROADMAP.md](docs/ROADMAP.md). Phases 0-8 done: Limine boot (UEFI +
+See [docs/ROADMAP.md](docs/ROADMAP.md). Phases 0-9a done: Limine boot (UEFI +
 BIOS), higher-half kernel, PMM/VMM/heap, preemptive per-CPU SMP scheduler
 (`-smp 4`), syscalls, ring-3 processes with per-process address spaces, VFS +
 ramdisk, AHCI disk, PS/2 input, double-buffered framebuffer + TrueType, a
@@ -111,4 +111,7 @@ traffic lights, Terminal via pty, Files, Text Editor + Settings C++ apps),
 e1000 networking, ACPI S5 poweroff, and a 30-minute stress harness
 (`make test-stress` — PASSED 2026-11-06: 0 exceptions, 285k context
 switches over 30 min on `-smp 4`, desktop still rendering at the end).
+Phase 9a (interactive input) done: hardware cursor follows the PS/2 mouse,
+arrow keys + shell history (UP/DOWN) work in the Terminal, keyboard
+routing follows window focus — `make test-boot` PASS x3.
 Definition of done: all met (see docs/ROADMAP.md).

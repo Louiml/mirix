@@ -222,8 +222,20 @@ void ps2_keyboard_irq(void)
     ev.ascii = 0;
     if (pressed) {
         if (ext) {
-            if (code == 0x1c)          /* keypad Enter */
-                ev.ascii = '\n';
+            /* Phase 9a: 0xE0-extended keys — arrows, home/end, pgup/pgdn, del */
+            switch (code) {
+            case 0x1c: ev.ascii = '\n';        break;   /* keypad Enter */
+            case 0x48: ev.ascii = (char)KEY_UP;    break;
+            case 0x50: ev.ascii = (char)KEY_DOWN;  break;
+            case 0x4b: ev.ascii = (char)KEY_LEFT;  break;
+            case 0x4d: ev.ascii = (char)KEY_RIGHT; break;
+            case 0x47: ev.ascii = (char)KEY_HOME;  break;
+            case 0x4f: ev.ascii = (char)KEY_END;   break;
+            case 0x49: ev.ascii = (char)KEY_PGUP;  break;
+            case 0x51: ev.ascii = (char)KEY_PGDN;  break;
+            case 0x53: ev.ascii = (char)KEY_DEL;   break;
+            default: break;
+            }
         } else if (code < 64) {
             ev.ascii = (lshift || rshift) ? kbd_shift[code] : kbd_lower[code];
         }

@@ -708,7 +708,7 @@ long main(void)
                         kbd_editor = 1;
                         editor_click(lx, ly);
                     } else {
-                        if (hit == term) kbd_editor = 0;
+                        kbd_editor = 0;   /* 9a: any non-Editor window -> keys to pty */
                         /* Files window: click a row to open the file / disk */
                         awin_t *fw = find_title("Files");
                         if (hit == fw) {
@@ -728,14 +728,21 @@ long main(void)
                 int base = 44, gap = 14;
                 int total = DOCK_ICONS * (base + gap) - gap;
                 int x0 = hit->x + (hit->w - total) / 2;
+                /* 9a: nearest dock icon wins (first-match mislabeled at edges) */
+                int besti = -1, bestd = 1 << 30;
                 for (int i = 0; i < DOCK_ICONS; i++) {
                     int icx = x0 + i * (base + gap) + base / 2;
-                    if (mx >= icx - base && mx <= icx + base && my >= hit->y) {
+                    int ad = mx - icx; if (ad < 0) ad = -ad;
+                    if (my >= hit->y && ad < bestd) { bestd = ad; besti = i; }
+                }
+                if (besti >= 0 && bestd <= base + gap) {
+                    int i = besti;
                         char m[80]; long n = 0;
                         n = acpy(m, n, "aurora: dock launch '");
                         n = acpy(m, n, dock_names[i]);
                         n = acpy(m, n, "'\n");
                         sys_write(1, m, n);
+                        kbd_editor = (i == 4);   /* 9a: only the Editor owns the kbd */
                         if (i == 0) {
                             if (find_wid(about->wid)) sys_win_focus(about->wid);
                         } else if (i == 1) {
@@ -793,8 +800,6 @@ long main(void)
                                 }
                             }
                         }
-                        break;
-                    }
                 }
             }
         }
@@ -831,10 +836,13 @@ long main(void)
             int x0 = dock->x + (dock->w - total) / 2;
             int new_hover = -1;
             if (my >= dock->y && my <= dock->y + dock->h) {
+                int bestd = 1 << 30;
                 for (int i = 0; i < DOCK_ICONS; i++) {
                     int icx = x0 + i * (base + gap) + base / 2;
-                    if (mx >= icx - 70 && mx <= icx + 70) { new_hover = i; break; }
+                    int ad = mx - icx; if (ad < 0) ad = -ad;
+                    if (ad < bestd) { bestd = ad; new_hover = i; }
                 }
+                if (bestd > 70) new_hover = -1;   /* 9a: nearest icon, max 70px */
             }
             if (new_hover != hover_icon) {
                 hover_icon = new_hover;

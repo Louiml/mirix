@@ -126,6 +126,10 @@ public:
 
     bool on_key(char c) override
     {
+        /* Phase 9a: ignore special keys (arrows etc.) and control chars */
+        unsigned char uc = (unsigned char)c;
+        if (uc >= 0x80) return false;
+        if (uc < 32 && c != '\n' && c != '\b') return false;
         if (c == '\n') {
             pending[npending] = 0;
             char m[96]; long n = 0;

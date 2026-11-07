@@ -170,16 +170,43 @@ long main(void)
     on = acpy(out, on, ") — type 'help'\n");
     sys_write(1, out, on);
 
+    /* Phase 9a: command history ring (UP/DOWN arrows recall previous cmds). */
+#define KEY_UP   0x81
+#define KEY_DOWN 0x82
+    static char hist[32][128];
+    static long hcount;          /* total commands stored (unbounded) */
+    long hpos = 0;               /* recall cursor: hcount = "new empty line" */
     char line[128];
     for (;;) {
         puts("mirix$ ");
         long ln = 0;
+        hpos = hcount;
         for (;;) {
             char c[64];
             long n = sys_read(0, c, (long)sizeof c);
             if (n <= 0) { sys_yield(); continue; }
             for (long i = 0; i < n; i++) {
                 char ch = c[i];
+                unsigned char uc = (unsigned char)ch;
+                if (uc == KEY_UP || uc == KEY_DOWN) {
+                    long np = hpos;
+                    if (uc == KEY_UP) {
+                        if (hcount - np >= 32 || np == 0) continue;
+                        np--;
+                    } else {
+                        if (np >= hcount) continue;
+                        np++;
+                    }
+                    hpos = np;
+                    for (long e = 0; e < ln; e++) sys_write(1, "\b \b", 3);
+                    ln = 0;
+                    if (np < hcount) {
+                        const char *h = hist[np % 32];
+                        while (*h && ln < (long)sizeof line - 1) { line[ln++] = *h; sys_write(1, h, 1); h++; }
+                    }
+                    continue;
+                }
+                if (uc >= 0x80) continue;          /* other special keys: ignore */
                 if (ch == '\n') { sys_write(1, "\n", 1); goto exec; }
                 if (ch == '\b') { if (ln > 0) { ln--; sys_write(1, "\b \b", 3); } continue; }
                 if (ln < (long)sizeof line - 1) { line[ln++] = ch; sys_write(1, &ch, 1); }
@@ -187,6 +214,16 @@ long main(void)
         }
 exec:
         line[ln] = 0;
+        if (ln > 0) {
+            long last = hcount > 0 ? (hcount - 1) % 32 : -1;
+            int dup = (last >= 0 && slen(hist[last]) == ln);
+            if (dup) for (long i = 0; i < ln; i++) if (hist[last][i] != line[i]) { dup = 0; break; }
+            if (!dup) {
+                char *dst = hist[hcount % 32];
+                for (long i = 0; i <= ln; i++) dst[i] = line[i];
+                hcount++;
+            }
+        }
         /* split first word */
         long sp = 0;
         while (line[sp] && line[sp] != ' ') sp++;

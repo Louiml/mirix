@@ -21,6 +21,8 @@ BUILD = ROOT / "build"
 ISO = BUILD / "mirixos.iso"
 SERIAL = BUILD / "serial.log"
 SHOT = BUILD / "screen.ppm"
+CURSOR_SHOT = BUILD / "screen-cursor.ppm"
+CURSOR_TMP = Path("/tmp/mirixos-cursor.ppm")
 # NOTE: AF_UNIX sockets cannot live on the drvfs (/mnt/*) mount, so the
 # QEMU monitor socket goes to /tmp and the screendump is copied back.
 MON = Path("/tmp/mirixos-mon.sock")
@@ -169,10 +171,10 @@ def main() -> int:
             # diskread 0 — the shell reads the AHCI disk via SYS_diskread
             send_keys(("d", "i", "s", "k", "r", "e", "a", "d", "spc", "0", "ret"))
             wait_for(("disk: LBA 0 read 4096 bytes, first 32: 'MIRIXAHCI0MirixOS AHCI",))
-            # QEMU `mouse_move dx dy` is RELATIVE, and its internal absolute
-            # cursor is clamped to the screen when computing the deltas — a
-            # huge negative move is "lost", so keep every move in-bounds.
-            # The cursor starts at the screen center (640,360).
+            # Absolute-coordinate mouse driving: QEMU `mouse_move dx dy` is
+            # RELATIVE to its internal pointer, so track the absolute target
+            # here and send deltas. Cursor starts at (640,360); all targets
+            # stay in-bounds (1280x720) so no clamped move is lost.
             def mcmd(c, wait=0.35):
                 s.sendall((c + "\n").encode())
                 try:
@@ -181,79 +183,118 @@ def main() -> int:
                     pass
                 time.sleep(wait)
 
-            # Phase 6b: inject mouse movement + a click, then return to center
-            mcmd("mouse_move 100 80")           # -> (740,440)
-            mcmd("mouse_move 150 90")           # -> (890,530)
-            mcmd("mouse_button 1")
-            mcmd("mouse_button 0")
-            mcmd("mouse_move -250 -170")        # -> back to (640,360)
-            wait_for(("[mouse] x=", "b=01"))
+            cur = [640, 360]
 
-            # Phase 7a: drive the Aurora desktop (all targets in-bounds).
-            # Dock geometry (DOCK_ICONS=6, SW=1280): dock at (461,638) 358x70;
-            # icon i screen center = 495 + i*58, y=670 (hover range +-70 overlaps
-            # neighbours, so icon 2 is clicked at x=651 to win the hit-test).
-            wait_for(("aurora: ready: 4 windows",))
-            mcmd("mouse_move 11 310")           # -> (651,670): dock icon 2
-            wait_for(("aurora: dock hover icon 2",))
-            mcmd("mouse_move -341 -586")        # -> (310,84): About title bar
-            mcmd("mouse_button 1")
-            mcmd("mouse_move 90 116")           # -> (400,200): drag by +90,+116
-            mcmd("mouse_button 0")
-            wait_for(("aurora: drag win",))
-            mcmd("mouse_move 174 -96")          # -> (574,104): Uptime close btn
-            mcmd("mouse_button 1")
-            mcmd("mouse_button 0")
-            wait_for(("aurora: closed win",))
+            def move_to(x, y, wait=0.35):
+                dx, dy = x - cur[0], y - cur[1]
+                cur[0], cur[1] = x, y
+                mcmd(f"mouse_move {dx} {dy}", wait=wait)
 
-            # Phase 7c: Files (Navigator) over VFS + AHCI
-            mcmd("mouse_move 77 566")           # -> (651,670): dock icon 2 (Files)
-            mcmd("mouse_button 1")
-            mcmd("mouse_button 0")
-            wait_for(("aurora: dock launch 'Files'", "aurora: files: 1 entries in /"))
-            mcmd("mouse_move 49 -412")          # -> (700,258): hello.txt row
-            mcmd("mouse_button 1")
-            mcmd("mouse_button 0")
-            wait_for(("aurora: files: read 'hello.txt' (16 bytes)",))
-            mcmd("mouse_move 0 12")             # -> (700,270): [ahci0] row
-            mcmd("mouse_button 1")
-            mcmd("mouse_button 0")
-            wait_for(("aurora: files: ahci LBA 0 read 4096 bytes, magic 'MIRIXAHCI0'",))
-            mcmd("mouse_move -60 90")           # -> back to (640,360)
+            def click(hold=1.2):
+                # Hold the button long enough for aurora's poll loop (which can
+                # take ~1s/iteration under TCG) to observe the pressed edge.
+                mcmd("mouse_button 1", wait=hold)
+                mcmd("mouse_button 0")
 
-            # Phase 7d: Text Editor (dock icon 4) — C++ mixtk app; click its
-            # window to focus it (keyboard routing), type "hi"+Enter, autosave.
-            mcmd("mouse_move 87 310")           # -> (727,670): dock icon 4 'Editor'
-            mcmd("mouse_button 1")
-            mcmd("mouse_button 0")
-            wait_for(("aurora: dock launch 'Editor'", "aurora: editor: open"))
-            mcmd("mouse_move -327 -370")        # -> (400,300): Editor window content
-            mcmd("mouse_button 1")
-            mcmd("mouse_button 0")
-            wait_for(("aurora: editor: click",))
-            send_keys(("h", "i", "ret"))
-            wait_for(("aurora: editor: line 'hi'", "aurora: editor: saved /notes.txt"))
-
-            # Phase 7d: Settings (dock icon 5) — click the first toggle row
-            mcmd("mouse_move 385 370")          # (400,300) -> (785,670): dock icon 5
-            mcmd("mouse_button 1")
-            mcmd("mouse_button 0")
-            wait_for(("aurora: dock launch 'Settings'", "aurora: settings: open"))
-            mcmd("mouse_move 5 -460")           # -> (790,210): 'Clock shows seconds' row
-            mcmd("mouse_button 1")
-            mcmd("mouse_button 0")
-            wait_for(("aurora: settings: 'clock seconds' -> off",
-                      "aurora: settings: saved /settings.cfg"))
-            mcmd("mouse_move -150 150")         # -> back to (640,360)
-            time.sleep(0.5)
-            s.sendall(f"screendump {SHOT_TMP}\n".encode())
             try:
-                s.recv(4096)
-            except socket.timeout:
+                # Phase 6b: inject mouse movement + a click, return to center
+                move_to(740, 440)
+                move_to(890, 530)
+                click()
+                move_to(640, 360)
+                wait_for(("[mouse] x=", "b=01"))
+
+                # Phase 7a: drive the Aurora desktop. Dock window (454,638)
+                # 372x70, icon i center = (495 + i*58, 670); the dock hit-test
+                # is nearest-icon, so icons are clicked at their exact centers.
+                wait_for(("aurora: ready: 4 windows",))
+                move_to(611, 670)                 # dock icon 2 'Files'
+                wait_for(("aurora: dock hover icon 2",))
+                move_to(310, 84)                  # About title bar
+                mcmd("mouse_button 1", wait=1.2)
+                move_to(400, 200)                 # drag by +90,+116
+                mcmd("mouse_button 0")
+                wait_for(("aurora: drag win",))
+                move_to(574, 104)                 # Uptime red close button
+                click()
+                wait_for(("aurora: closed win",))
+
+                # Phase 7c: Files (Navigator) over VFS + AHCI
+                move_to(611, 670)                 # dock icon 2 'Files'
+                click()
+                wait_for(("aurora: dock launch 'Files'", "aurora: files: 1 entries in /"))
+                move_to(700, 258)                 # hello.txt row
+                click()
+                wait_for(("aurora: files: read 'hello.txt' (16 bytes)",))
+                move_to(700, 270)                 # [ahci0] row
+                click()
+                wait_for(("aurora: files: ahci LBA 0 read 4096 bytes, magic 'MIRIXAHCI0'",))
+                move_to(640, 360)
+
+                # Phase 7d: Text Editor (dock icon 4) — C++ mixtk app; click its
+                # window to focus it (keyboard routing), type "hi"+Enter
+                move_to(727, 670)                 # dock icon 4 'Editor'
+                click()
+                wait_for(("aurora: dock launch 'Editor'", "aurora: editor: open"))
+                move_to(400, 300)                 # Editor window content
+                click()
+                wait_for(("aurora: editor: click",))
+                send_keys(("h", "i", "ret"))
+                wait_for(("aurora: editor: line 'hi'", "aurora: editor: saved /notes.txt"))
+
+                # Phase 7d: Settings (dock icon 5) — click the first toggle row
+                move_to(785, 670)                 # dock icon 5 'Settings'
+                click()
+                wait_for(("aurora: dock launch 'Settings'", "aurora: settings: open"))
+                move_to(790, 210)                 # 'Clock shows seconds' row
+                click()
+                wait_for(("aurora: settings: 'clock seconds' -> off",
+                          "aurora: settings: saved /settings.cfg"))
+                move_to(640, 360)
+                time.sleep(0.5)
+
+                # Phase 9a: hardware cursor follows the mouse -> screendump at
+                # (100,100); the arrow cursor's pure-white pixels must be there.
+                move_to(100, 100)
+                wait_for(("[mouse] x=100 y=100",))
+                time.sleep(0.6)
+                if CURSOR_TMP.exists():
+                    CURSOR_TMP.unlink()
+                s.sendall(f"screendump {CURSOR_TMP}\n".encode())
+                try:
+                    s.recv(4096)
+                except socket.timeout:
+                    pass
+                time.sleep(0.8)
+                if CURSOR_TMP.exists():
+                    shutil.copy2(CURSOR_TMP, CURSOR_SHOT)
+                move_to(640, 360)
+
+                # Phase 9a: click the Terminal dock icon so keystrokes route to
+                # the shell pty (the Editor owns the kbd while focused)
+                move_to(669, 670)                 # dock icon 3 'Terminal'
+                click()
+                wait_for(("aurora: dock launch 'Terminal'",))
+                move_to(640, 360)
+
+                # Phase 9a: UP,UP recalls "ps" from mirsh history, ret re-runs it
+                # (history so far: ls, ps, diskread 0) -> "name=shell" twice
+                send_keys(("up", "up", "ret"))
+                time.sleep(1.0)
+            except (BrokenPipeError, OSError) as e:
+                print(f"monitor pipe broke during drive ({e}); evaluating serial anyway")
+
+            try:
+                s.sendall(f"screendump {SHOT_TMP}\n".encode())
+                try:
+                    s.recv(4096)
+                except socket.timeout:
+                    pass
+                time.sleep(0.5)
+                s.sendall(b"quit\n")
+                s.close()
+            except (BrokenPipeError, OSError):
                 pass
-            time.sleep(0.5)
-            s.sendall(b"quit\n")
-            s.close()
             if SHOT_TMP.exists():
                 shutil.copy2(SHOT_TMP, SHOT)
     finally:
@@ -383,6 +424,24 @@ def main() -> int:
         and "aurora: settings: 'clock seconds' -> off" in serial
         and "aurora: settings: saved /settings.cfg" in serial
     )
+    # Phase 9a: cursor pixels at the moved-to position + history recall
+    ok_9a = serial.count("name=shell") >= 2
+    cur_white = cur_ctrl = -1
+    if CURSOR_SHOT.exists():
+        w, h, maxval, raster = read_ppm(CURSOR_SHOT)
+        def white_in(x0, y0, x1, y1):
+            n = 0
+            for yy in range(y0, min(y1, h)):
+                for xx in range(x0, min(x1, w)):
+                    i = (yy * w + xx) * 3
+                    if raster[i] == 255 and raster[i+1] == 255 and raster[i+2] == 255:
+                        n += 1
+            return n
+        cur_white = white_in(95, 95, 126, 126)     # where the cursor was moved
+        cur_ctrl = white_in(1200, 600, 1240, 640)  # bare desktop corner: must be clean
+        print(f"cursor check: white px at (100,100)={cur_white}, at center={cur_ctrl}")
+        ok_9a = ok_9a and cur_white >= 5 and cur_ctrl == 0
+
     ok_serial = (
         BANNER in serial
         and "bootloader: Limine" in serial
@@ -408,6 +467,7 @@ def main() -> int:
         and ok_acpi
         and ok_smp
         and ok_7d
+        and ok_9a
     )
 
     ok_screen = False

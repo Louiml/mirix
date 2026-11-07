@@ -500,6 +500,9 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | VFS + ramdisk | `kernel/fs/vfs.c` | 4b (done) |
 | AHCI SATA disk | `kernel/drivers/ahci.c` | 4c (done) |
 | Double-buffered fb + cursor | `kernel/drivers/fb.c` | 6a/6b (done) |
+| Special keys (KEY_UP..KEY_DEL 0x81-0x89) | `kernel/drivers/ps2.h`, `ps2.c` | 9a (done) |
+| mirsh history ring (UP/DOWN recall) | `user/shell.c` | 9a (done) |
+| Focus-based keyboard routing (kbd_editor) + nearest-icon dock hit-test | `user/aurora.c` | 9a (done) |
 | TrueType renderer | `kernel/lib/ttf.c` | 6c (done) |
 | Window manager / compositor | `kernel/gui/wm.c` | 7a (done) |
 | Aurora desktop process | `user/aurora.c` | 7a (done) |
@@ -512,6 +515,20 @@ Interface via `syscall`/`sysret`, number in `rax`, args in
 | virtio-blk | `kernel/drivers/virtio_blk.c` | 4 |
 | virtio-gpu | `kernel/drivers/virtio_gpu.c` | 6 |
 | virtio-net | `kernel/drivers/virtio_net.c` | 8 |
+
+## Input path (Phase 9a)
+
+PS/2 keyboard IRQ1 and mouse IRQ12 push events on per-device rings
+(`kernel/drivers/ps2.c`); `SYS_getevent` merges them into `input_event_t`
+(type 0 = kbd, 1 = mouse). 0xE0-extended scancodes (arrows, Home/End,
+PgUp/PgDn, Del) become special codes 0x81-0x89 in the `ascii` field. The
+mouse IRQ also tracks the absolute cursor position and moves the hardware
+cursor (`fb_set_cursor`, drawn in `fb_present`). Aurora pops events, and
+routes keystrokes to the focused app: the Editor window while it is focused
+(`kbd_editor`), otherwise to the shell pty master (`/ptym0`); shell output
+is mirrored to serial and the Terminal window. mirsh keeps a 32-entry
+command history recalled with UP/DOWN. Dock clicks/hover use the nearest
+icon center.
 
 ## Visual identity ("Aurora")
 

@@ -282,6 +282,38 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
          so the script now tracks the absolute pointer to aim dock clicks;
          90 s smoke after the fix: PASS, dock hover + shell markers present.)
 
+## Phase 9a — interactive input & terminal (done 2026-11-07)
+
+Goal: make the desktop genuinely interactive — a hardware cursor that
+follows the mouse and a working terminal with line editing.
+
+- **Arrow/special keys**: 0xE0-extended scancodes (arrows, Home/End,
+  PgUp/PgDn, Del) are mapped in `kernel/drivers/ps2.c` to special codes
+  `KEY_UP..KEY_DEL` (0x81-0x89) in `kernel/drivers/ps2.h`, delivered in the
+  `ascii` field of input events.
+- **Shell history**: mirsh keeps a 32-entry history ring (`user/shell.c`);
+  UP/DOWN recall previous commands (with erase + redraw), consecutive
+  duplicates are not stored, other special keys are ignored.
+- **Keyboard ownership follows focus** (`user/aurora.c`): only the Editor
+  window captures keystrokes (`kbd_editor`); clicking any other window or
+  dock icon routes keys back to the shell pty.
+- **Editor key filter** (`user/editor.cpp`): `on_key` ignores codes >= 0x80
+  and control chars except Enter/Backspace.
+- **Hardware cursor**: already composited in `fb_present` (12x19 arrow,
+  `fb_set_cursor`/`fb_draw_cursor` in `kernel/drivers/fb.c`); the PS/2
+  mouse IRQ now moves it on every packet and it is visible from boot.
+- **Robust dock hit-testing** (`user/aurora.c`): click and hover use the
+  *nearest* dock icon (was first-match with overlapping ranges, which
+  mislabeled icons at the edges).
+- **Test** (`tools/test_boot.py`, 9a block): drives the mouse to (100,100)
+  and asserts the cursor's pure-white pixels appear there (and nowhere in
+  a control box on the bare desktop) via screendump; then clicks the
+  Terminal dock icon and sends `up,up,ret`, asserting mirsh re-ran `ps`
+  (`name=shell` appears twice — history recall through the pty).
+  `make test-boot`: **PASS x3 consecutive** (2026-11-07): cursor check
+  62 white px at (100,100) / 0 in control box, serial + screen checks
+  PASS, 0 exceptions.
+
 ## Definition of done (v1.0) — ALL MET (2026-11-06)
 
 - [x] Boots to the graphical desktop in QEMU (`make test-boot` PASS: serial
@@ -292,6 +324,9 @@ Strictly one phase at a time; each phase ends with something bootable/verifiable
       `ls`/`cat`/`write`/`diskread` through mirsh + VFS/ramdisk/AHCI)
 - [x] Takes keyboard+mouse input (PS/2 IRQ path -> input ring -> aurora ->
       pty/Editor; monitor-injected input verified in tests)
+- [x] Interactive input (Phase 9a): hardware cursor follows the PS/2 mouse
+      (screendump-verified), arrow keys + mirsh history (UP/DOWN) work through
+      the pty, keyboard routing follows window focus
 - [x] Survives a 30-minute stress run without a kernel panic
       (`make test-stress`, STRESS_SECONDS=1800: PASS — 0 exceptions/panics,
       285k context switches, 506k ticks, desktop still rendering at the end)

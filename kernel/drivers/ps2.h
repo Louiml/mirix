@@ -27,6 +27,19 @@ typedef struct {
     uint8_t buttons;
 } input_event_t;
 
+/* Phase 9a: special (non-printable) key codes delivered in .ascii for
+ * 0xE0-extended scancodes — arrows, home/end, pgup/pgdn, delete. Consumers
+ * compare as (unsigned char). */
+#define KEY_UP    0x81
+#define KEY_DOWN  0x82
+#define KEY_LEFT  0x83
+#define KEY_RIGHT 0x84
+#define KEY_HOME  0x85
+#define KEY_END   0x86
+#define KEY_PGUP  0x87
+#define KEY_PGDN  0x88
+#define KEY_DEL   0x89
+
 void ps2_init(void);
 void ps2_keyboard_irq(void);          /* called from idt.c on IRQ1 */
 void ps2_mouse_irq(void);             /* called from idt.c on IRQ12 */
