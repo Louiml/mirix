@@ -195,6 +195,9 @@ void _start(void)
     /* Phase 6a: double buffer — back buffer allocated from the heap; the
      * main loop presents it (fb_present) so uart/fb drawing never tears. */
     if (fb_ready()) {
+        uart_printf("fb: enabling double buffer %ux%u (%llu KiB back buffer)\n",
+                    fb_width(), fb_height(),
+                    (unsigned long long)((uint64_t)fb_width() * fb_height() * 4 / 1024));
         fb_enable_double_buffer();
         uart_printf("fb: double buffer ready (%ux%u, back buffer %llu KiB), main loop presents\n",
                     fb_width(), fb_height(),
