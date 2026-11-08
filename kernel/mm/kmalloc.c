@@ -38,15 +38,24 @@ static uint64_t heap_grow(uint64_t bytes)
         return 0;
     uint64_t base = g_heap_top;
     uint64_t pages = PAGE_ALIGN_UP(bytes) / PAGE_SIZE;
+    if (bytes > (1ULL << 20))
+        uart_printf("heap_grow: mapping %llu pages at %p ...\n",
+                    (unsigned long long)pages, (void *)base);
     for (uint64_t i = 0; i < pages; i++) {
         uint64_t phys = pmm_alloc_page();
-        if (phys == 0)
+        if (phys == 0) {
+            uart_printf("heap_grow: PMM exhausted at page %llu/%llu\n",
+                        (unsigned long long)i, (unsigned long long)pages);
             return 0;
+        }
         memset(phys_to_virt(phys), 0, PAGE_SIZE);
         vmm_map(g_heap_top + i * PAGE_SIZE, phys, PTE_PRESENT | PTE_RW);
     }
     g_heap_top += pages * PAGE_SIZE;
     g_heap_grown += pages * PAGE_SIZE;
+    if (bytes > (1ULL << 20))
+        uart_printf("heap_grow: done, %llu pages, top=%p\n",
+                    (unsigned long long)pages, (void *)g_heap_top);
     return base;
 }
 
